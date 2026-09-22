@@ -1,6 +1,6 @@
 {
     "name": "reposite",
-    "version": "2.1.0",
+    "version": "2.1.1",
     "description": "Self-hosted backup manager for WordPress websites: files over FTP/SFTP, database dump, versioned in GitHub",
     "scripts": {
         "dev": "next dev",
