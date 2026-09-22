@@ -99,6 +99,7 @@ By default, backups run in **incremental** mode:
 - Only downloads new or modified files
 - Deletes local files that no longer exist on the remote (skipped if part of the remote listing failed)
 - FTP scanning uses a pool of 5 parallel connections for faster listing
+- Skips what is regenerable or foreign to the site, without even listing it: archives left by backup plugins (UpdraftPlus, All-in-One WP Migration, Duplicator, BackWPup, WPvivid), page caches (WP Rocket, W3 Total Cache, LiteSpeed, Divi), update leftovers, `debug.log` and `error_log`. Excluded entries are named in the run log. A site-specific exclusion goes in the `.gitignore` of its repository.
 
 The "Full download" option clears the local tree and downloads every file again. It refuses to run when part of the remote listing failed, so a partial snapshot never replaces a complete one.
 

@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BackupCancelledError } from './cancel';
 import { createLogger } from './logger';
 import type { RemoteClientFactory } from './remote/client';
-import { deleteOrphans, isSafePath, planSync, scanRemote, syncFiles } from './sync';
+import {
+    compileExcludes,
+    deleteOrphans,
+    isSafePath,
+    planSync,
+    scanRemote,
+    syncFiles,
+} from './sync';
 import { FakeRemote } from './testing/fake-remote';
 
 // ============ Fixtures ============
@@ -62,7 +69,57 @@ describe('isSafePath', () => {
     });
 });
 
+describe('compileExcludes', () => {
+    it('anchors patterns with a slash at the web root', () => {
+        const excluded = compileExcludes(['wp-content/debug.log']);
+        expect(excluded('wp-content/debug.log', false)).toBe(true);
+        expect(excluded('wp-content/plugins/x/wp-content/debug.log', false)).toBe(false);
+        expect(excluded('wp-content/debug.log.1', false)).toBe(false);
+    });
+
+    it('matches a bare name at any depth', () => {
+        const excluded = compileExcludes(['error_log']);
+        expect(excluded('error_log', false)).toBe(true);
+        expect(excluded('wp-admin/includes/error_log', false)).toBe(true);
+        expect(excluded('wp-admin/error_log.txt', false)).toBe(false);
+    });
+
+    it('restricts a trailing slash to directories and matches them exactly', () => {
+        const excluded = compileExcludes(['wp-content/cache/']);
+        expect(excluded('wp-content/cache', true)).toBe(true);
+        expect(excluded('wp-content/cache', false)).toBe(false);
+        expect(excluded('wp-content/cache-notes', true)).toBe(false);
+        expect(excluded('wp-content/cache/page.html', false)).toBe(false);
+    });
+
+    it('expands * within one segment and escapes the rest', () => {
+        const excluded = compileExcludes(['wp-content/temp-write-test-*', '*.mmdb']);
+        expect(excluded('wp-content/temp-write-test-6a6ff4465a1ad0-99606319', false)).toBe(true);
+        expect(excluded('wp-content/temp-write-test-x/y', false)).toBe(false);
+        expect(excluded('wp-content/plugins/geo/GeoLite2.mmdb', false)).toBe(true);
+        expect(excluded('wp-content/plugins/geo/GeoLite2ammdb', false)).toBe(false);
+    });
+});
+
 describe('scanRemote', () => {
+    it('skips excluded directories and files without listing them', async () => {
+        remote.put('/www/wp-content/updraft/backup-uploads.zip', 'zip');
+        remote.put('/www/wp-content/cache/page/index.html', 'html');
+        remote.put('/www/wp-content/temp-write-test-6a6ff4465a1ad0-99606319', '');
+        remote.put('/www/wp-content/debug.log', 'log');
+        remote.put('/www/wp-includes/error_log', 'log');
+        remote.put('/www/wp-content/uploads/cache-notes.txt', 'kept');
+        remote.unlistable.add('/www/wp-content/cache');
+        const result = await scanRemote([remote.client()], '/www', log);
+        expect(result.listErrors).toBe(0);
+        expect(result.files.map((f) => f.path).sort()).toEqual([
+            '/www/index.php',
+            '/www/wp-config.php',
+            '/www/wp-content/uploads/a.jpg',
+            '/www/wp-content/uploads/cache-notes.txt',
+        ]);
+    });
+
     it('lists every file recursively', async () => {
         const result = await scanRemote([remote.client(), remote.client()], '/www', log);
         expect(result.listErrors).toBe(0);
@@ -201,6 +258,30 @@ describe('syncFiles', () => {
             'www/wp-content/uploads/a.jpg',
         ]);
         expect(fs.readFileSync(path.join(localRoot, 'www/wp-config.php'), 'utf8')).toBe('config');
+    });
+
+    it('prunes a local file under an excluded path and honours a custom list', async () => {
+        remote.put('/www/wp-content/updraft/backup-uploads.zip', 'zip');
+        writeLocal('www/wp-content/updraft/backup-uploads.zip', 'zip');
+        const stats = await syncFiles(remote.factory(), localRoot, '/www', {
+            mode: 'incremental',
+            log,
+        });
+        expect(stats.scanned).toBe(3);
+        expect(stats.deleted).toBe(1);
+        expect(localFiles()).not.toContain('www/wp-content/updraft/backup-uploads.zip');
+
+        const custom = await syncFiles(remote.factory(), localRoot, '/www', {
+            mode: 'incremental',
+            log,
+            excludes: ['wp-content/uploads/'],
+        });
+        expect(custom.scanned).toBe(3);
+        expect(localFiles()).toEqual([
+            'www/index.php',
+            'www/wp-config.php',
+            'www/wp-content/updraft/backup-uploads.zip',
+        ]);
     });
 
     it('skips orphan deletion when a directory could not be listed', async () => {

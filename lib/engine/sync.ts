@@ -10,6 +10,49 @@ export const PRESERVED = new Set(['.git', '.gitignore', 'README.md', 'db.sql']);
 /** Written to the clone when it has no `.gitignore` yet. GitHub refuses files over 100 MB. */
 export const GITIGNORE_TEMPLATE = '# Files GitHub refuses (> 100 MB)\n*.mmdb\n';
 
+/**
+ * Remote paths never synced, relative to the web root, with gitignore-like semantics: a pattern containing `/` is anchored at the web root, a bare name matches at any depth, a trailing `/` matches directories only (skipped without being listed), `*` matches within one path segment. Only what is regenerable or foreign to the site belongs here (archives produced by backup plugins, caches, update leftovers, logs): never uploads, plugins, themes or configuration, however large. A site-specific exclusion goes in the `.gitignore` of its repository.
+ */
+export const DEFAULT_EXCLUDES = [
+    // Archives produced by backup plugins (UpdraftPlus, All-in-One WP Migration, Duplicator, BackWPup, WPvivid)
+    'wp-content/updraft/',
+    'wp-content/ai1wm-backups/',
+    'wp-content/backups-dup-lite/',
+    'wp-content/backups-dup-pro/',
+    'wp-content/uploads/backwpup-*/',
+    'wp-content/wpvividbackups/',
+    // Page caches (WP Rocket, W3 Total Cache, LiteSpeed Cache, Divi)
+    'wp-content/cache/',
+    'wp-content/litespeed/',
+    'wp-content/et-cache/',
+    // Leftovers of core and plugin updates
+    'wp-content/upgrade/',
+    'wp-content/upgrade-temp-backup/',
+    'wp-content/temp-write-test-*',
+    // Logs
+    'wp-content/debug.log',
+    'error_log',
+];
+
+/** `relPath` is relative to the web root, without leading slash. */
+export type ExcludeMatcher = (relPath: string, isDir: boolean) => boolean;
+
+/** Compiles exclusion patterns (see `DEFAULT_EXCLUDES` for the syntax) into one matcher. */
+export function compileExcludes(patterns: readonly string[]): ExcludeMatcher {
+    const rules = patterns.map((pattern) => {
+        const dirOnly = pattern.endsWith('/');
+        const body = dirOnly ? pattern.slice(0, -1) : pattern;
+        const anchor = body.includes('/') ? '^' : '(^|/)';
+        const source = body
+            .split('*')
+            .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+            .join('[^/]*');
+        return { dirOnly, regex: new RegExp(`${anchor}${source}$`) };
+    });
+    return (relPath, isDir) =>
+        rules.some((rule) => (isDir || !rule.dirOnly) && rule.regex.test(relPath));
+}
+
 export const DUMP_SCRIPT_NAME = 'dewwwe-backup.php';
 export const TOKEN_FILE_NAME = '.dewwwe-backup-token';
 const DUMP_FILE_PATTERN = /^db_.*\.sql$/;
@@ -45,13 +88,15 @@ export interface ScanResult {
 
 /**
  * Breadth-first listing of `rootDir`, one worker per client. Unlistable directories are
- * counted and skipped, so a partial scan is reported rather than thrown.
+ * counted and skipped, so a partial scan is reported rather than thrown. Excluded entries
+ * are logged and left out: an excluded directory is never listed.
  */
 export async function scanRemote(
     clients: RemoteClient[],
     rootDir: string,
     log: Logger,
     signal?: AbortSignal,
+    isExcluded: ExcludeMatcher = compileExcludes(DEFAULT_EXCLUDES),
 ): Promise<ScanResult> {
     const files: RemoteEntry[] = [];
     const pending: string[] = [rootDir];
@@ -78,7 +123,13 @@ export async function scanRemote(
                 for (const entry of await client.list(dir)) {
                     const relPath = toRelativePath(entry.path);
                     if (!isSafePath(relPath)) continue;
-                    if (entry.type === 'dir') {
+                    const isDir = entry.type === 'dir';
+                    const fromRoot = path.posix.relative(rootDir, entry.path);
+                    if (isExcluded(fromRoot, isDir)) {
+                        log.info(`  Excluded ${fromRoot}${isDir ? '/' : ''}`);
+                        continue;
+                    }
+                    if (isDir) {
                         pending.push(entry.path);
                     } else if (!(
                         dir === rootDir && isBackupArtifact(path.posix.basename(entry.path))
@@ -209,12 +260,15 @@ export interface SyncOptions {
     mode: SyncMode;
     log: Logger;
     signal?: AbortSignal;
+    /** Exclusion patterns relative to the web root, `DEFAULT_EXCLUDES` when omitted. */
+    excludes?: readonly string[];
 }
 
 /**
  * Scan, plan, download, prune. Incremental mode keeps files it could not verify: when any
  * directory failed to list, orphan deletion is skipped so a flaky listing never deletes a
- * site from the backup. Full mode needs a complete listing and fails otherwise.
+ * site from the backup. Full mode needs a complete listing and fails otherwise. A local file
+ * under an excluded path is an orphan like any other: it leaves the tree at the next prune.
  */
 export async function syncFiles(
     factory: RemoteClientFactory,
@@ -223,10 +277,11 @@ export async function syncFiles(
     options: SyncOptions,
 ): Promise<SyncStats> {
     const { mode, log, signal } = options;
+    const isExcluded = compileExcludes(options.excludes ?? DEFAULT_EXCLUDES);
     const clients = await openPool(factory);
     try {
         log.info(`Scanning remote files (${mode})...`);
-        const { files, listErrors } = await scanRemote(clients, rootDir, log, signal);
+        const { files, listErrors } = await scanRemote(clients, rootDir, log, signal, isExcluded);
         if (files.length === 0 && listErrors > 0) throw new Error('Could not list any remote file');
         if (mode === 'full' && listErrors > 0)
             throw new Error(`Full download aborted: ${listErrors} directories could not be listed`);
