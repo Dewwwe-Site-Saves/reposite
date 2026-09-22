@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { errorMessage, throwIfAborted } from './cancel';
 import type { RemoteClient, RemoteClientFactory, RemoteEntry } from './remote/client';
+import { openClient } from './remote/connect';
 import type { Logger, SyncStats } from './types';
 
 /** Local root entries never touched by the sync (git metadata, the dump, the README). */
@@ -278,7 +279,7 @@ export async function syncFiles(
 ): Promise<SyncStats> {
     const { mode, log, signal } = options;
     const isExcluded = compileExcludes(options.excludes ?? DEFAULT_EXCLUDES);
-    const clients = await openPool(factory);
+    const clients = await openPool(factory, log, signal);
     try {
         log.info(`Scanning remote files (${mode})...`);
         const { files, listErrors } = await scanRemote(clients, rootDir, log, signal, isExcluded);
@@ -332,10 +333,14 @@ export async function syncFiles(
     }
 }
 
-/** Opens `poolSize` connections; closes the ones opened if any fails. */
-async function openPool(factory: RemoteClientFactory): Promise<RemoteClient[]> {
+/** Opens `poolSize` connections, each with the connection retries; closes the ones opened if any fails. */
+async function openPool(
+    factory: RemoteClientFactory,
+    log: Logger,
+    signal?: AbortSignal,
+): Promise<RemoteClient[]> {
     const results = await Promise.allSettled(
-        Array.from({ length: factory.poolSize }, () => factory.create()),
+        Array.from({ length: factory.poolSize }, () => openClient(factory, { log, signal })),
     );
     const clients = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
     const failure = results.find((r) => r.status === 'rejected');

@@ -5,6 +5,7 @@ import { createFtpFactory } from './ftp';
 import { createSftpFactory } from './sftp';
 
 export type { RemoteClient, RemoteClientFactory, RemoteEntry } from './client';
+export { CONNECT_RETRY_DELAYS_MS, openClient, type ConnectOptions } from './connect';
 
 export function createRemoteFactory(site: ConnectionConfig): RemoteClientFactory {
     return site.protocol === 'sftp' ? createSftpFactory(site) : createFtpFactory(site);

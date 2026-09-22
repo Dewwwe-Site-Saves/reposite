@@ -185,6 +185,35 @@ describe('runBackup', () => {
         );
     });
 
+    it('reconnects for the dump when the host drops the first connection', async () => {
+        // The socket dies on the first command after login: every later call fails too.
+        const dead = new Error('Client is closed because Server sent FIN packet unexpectedly');
+        const deadClient = {
+            list: async () => Promise.reject(dead),
+            download: async () => Promise.reject(dead),
+            upload: async () => Promise.reject(dead),
+            remove: async () => Promise.reject(dead),
+            close: async () => {},
+        };
+        const real = remote.factory();
+        let created = 0;
+        remoteRef.current = {
+            factory: () => ({
+                poolSize: real.poolSize,
+                create: async () => (created++ === 0 ? deadClient : real.create()),
+            }),
+        };
+
+        const result = await run();
+        expect(result.errorMessage).toBeNull();
+        expect(result.status).toBe('success');
+        expect(result.dumpSizeBytes).toBe(SQL.length);
+        expect(entries.map((e) => e.msg)).toContain('[site.test] Reconnecting for the dump...');
+        expect(entries.filter((e) => e.level === 'warn').map((e) => e.msg)).toContain(
+            `[site.test] Could not clean up leftovers: ${dead.message}`,
+        );
+    });
+
     it('skips git when asked', async () => {
         const result = await run({ skipGit: true });
         expect(result.status).toBe('success');

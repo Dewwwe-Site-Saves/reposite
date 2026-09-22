@@ -5,7 +5,7 @@ import { DUMP_FILE_NAME, dumpDatabase } from './dump';
 import { commitAndTag, ensureRepo, formatTag, push, type GitContext } from './git';
 import { createRelease, formatReleaseBody, parseRepoUrl } from './github';
 import { createLogger } from './logger';
-import { createRemoteFactory, remoteRootDir, type RemoteClient } from './remote';
+import { createRemoteFactory, openClient, remoteRootDir, type RemoteClient } from './remote';
 import { updateSharePointItem } from './sharepoint';
 import { GITIGNORE_TEMPLATE, isBackupArtifact, syncFiles } from './sync';
 import type {
@@ -58,10 +58,15 @@ export async function runBackup(
         throwIfAborted(signal);
         prepareLocalTree(localRoot, site, log);
 
-        // 2 + 3. Leftovers from an interrupted run, then the dump, on one connection.
-        const client = await factory.create();
+        // 2 + 3. Leftovers from an interrupted run, then the dump, on one connection unless the cleanup lost it: a listing that fails right after login is usually a socket the host dropped, and the dump would only inherit a dead client.
+        let client = await openClient(factory, { log, signal });
         try {
-            await removeRemoteLeftovers(client, rootDir, log);
+            if (!(await removeRemoteLeftovers(client, rootDir, log))) {
+                await client.close().catch(() => undefined);
+                throwIfAborted(signal);
+                log.info('Reconnecting for the dump...');
+                client = await openClient(factory, { log, signal });
+            }
             throwIfAborted(signal);
             const dump = await dumpDatabase(
                 site,
@@ -192,12 +197,12 @@ function prepareLocalTree(localRoot: string, site: SiteConfig, log: Logger): voi
     }
 }
 
-/** Dump, script or token file left on the web root by an interrupted run. */
+/** Dump, script or token file left on the web root by an interrupted run. Returns false when the cleanup failed: the connection is not to be trusted any more. */
 async function removeRemoteLeftovers(
     client: RemoteClient,
     rootDir: string,
     log: Logger,
-): Promise<void> {
+): Promise<boolean> {
     try {
         const leftovers = (await client.list(rootDir)).filter(
             (entry) => entry.type === 'file' && isBackupArtifact(path.posix.basename(entry.path)),
@@ -206,8 +211,11 @@ async function removeRemoteLeftovers(
             log.info(`Removing leftover ${entry.path}`);
             await client.remove(entry.path);
         }
+        return true;
     } catch (error) {
+        if (isCancellation(error)) throw error;
         log.warn(`Could not clean up leftovers: ${errorMessage(error)}`);
+        return false;
     }
 }
 
