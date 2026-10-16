@@ -92,6 +92,11 @@ export function listSites(): Promise<SiteSummary[]> {
     return prisma.site.findMany({ select: siteSelect, orderBy: { domain: 'asc' } });
 }
 
+/** For the sidebar badge: the shell has no use for the rows themselves. */
+export function countSites(): Promise<number> {
+    return prisma.site.count();
+}
+
 export function getSite(id: number): Promise<SiteSummary | null> {
     return prisma.site.findUnique({ where: { id }, select: siteSelect });
 }

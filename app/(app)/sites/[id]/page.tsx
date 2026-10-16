@@ -4,6 +4,7 @@ import { getSettings, getSite, listBackups } from '@/lib/db';
 import { backupsQuerySchema, parseId } from '@/lib/validation';
 import { RunBackupButton } from '@/components/BackupActions';
 import { BackupHistory } from '@/components/BackupHistory';
+import { PageHeader } from '@/components/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { SiteDetailActions } from './actions';
@@ -21,21 +22,25 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
     ]);
 
     return (
-        <div className="max-w-4xl">
-            <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                    <h1 className="text-2xl font-bold">{site.domain}</h1>
-                    {site.enabled ? (
-                        <Badge variant="default">Active</Badge>
-                    ) : (
-                        <Badge variant="secondary">Disabled</Badge>
-                    )}
-                </div>
-                <div className="flex gap-2">
-                    <RunBackupButton siteId={site.id} domain={site.domain} size="default" />
-                    <SiteDetailActions siteId={site.id} />
-                </div>
-            </div>
+        <div className="max-w-4xl space-y-6">
+            <PageHeader
+                title={
+                    <span className="flex items-center gap-3">
+                        {site.domain}
+                        {site.enabled ? (
+                            <Badge variant="default">Active</Badge>
+                        ) : (
+                            <Badge variant="secondary">Disabled</Badge>
+                        )}
+                    </span>
+                }
+                action={
+                    <div className="flex gap-2">
+                        <RunBackupButton siteId={site.id} domain={site.domain} size="default" />
+                        <SiteDetailActions siteId={site.id} />
+                    </div>
+                }
+            />
 
             <div className="space-y-6">
                 <Card>

@@ -1,6 +1,7 @@
 import { listSitesWithLastBackup } from '@/lib/db';
 import { SiteCard } from '@/components/SiteCard';
 import { RunAllButton } from '@/components/BackupActions';
+import { PageHeader } from '@/components/PageHeader';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
@@ -9,16 +10,12 @@ export default async function Dashboard() {
     const sites = await listSitesWithLastBackup();
 
     return (
-        <div>
-            <div className="flex items-center justify-between mb-6">
-                <div>
-                    <h1 className="text-2xl font-bold">Dashboard</h1>
-                    <p className="text-sm text-muted-foreground mt-1">
-                        {sites.length} site{sites.length !== 1 ? 's' : ''} configured
-                    </p>
-                </div>
-                {sites.length > 0 && <RunAllButton />}
-            </div>
+        <div className="space-y-6">
+            <PageHeader
+                title="Dashboard"
+                subtitle={`${sites.length} site${sites.length !== 1 ? 's' : ''} configured`}
+                action={sites.length > 0 && <RunAllButton />}
+            />
 
             {sites.length === 0 ? (
                 <div className="text-center py-16 text-muted-foreground">

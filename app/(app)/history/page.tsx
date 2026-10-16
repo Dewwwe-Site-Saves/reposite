@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { BackupHistory } from '@/components/BackupHistory';
 import { HistoryFilters } from '@/components/HistoryFilters';
+import { PageHeader } from '@/components/PageHeader';
 import { Pagination } from '@/components/Pagination';
 import { Card, CardContent } from '@/components/ui/card';
 import { listBackups, listSites } from '@/lib/db';
@@ -44,18 +45,18 @@ export default async function HistoryPage({
     const filtered = query.siteId !== undefined || query.status !== undefined;
 
     return (
-        <div>
-            <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
-                <div>
-                    <h1 className="text-2xl font-bold">History</h1>
-                    <p className="text-sm text-muted-foreground mt-1">Backup execution history</p>
-                </div>
-                <HistoryFilters
-                    sites={sites.map((site) => ({ id: site.id, domain: site.domain }))}
-                    siteId={query.siteId}
-                    status={query.status}
-                />
-            </div>
+        <div className="space-y-6">
+            <PageHeader
+                title="History"
+                subtitle="Backup execution history"
+                action={
+                    <HistoryFilters
+                        sites={sites.map((site) => ({ id: site.id, domain: site.domain }))}
+                        siteId={query.siteId}
+                        status={query.status}
+                    />
+                }
+            />
 
             <Card>
                 <CardContent className="p-0">

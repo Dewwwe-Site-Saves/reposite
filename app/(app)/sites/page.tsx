@@ -1,6 +1,7 @@
 import { listSites } from '@/lib/db';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { PageHeader } from '@/components/PageHeader';
 import { SitesTable } from '@/components/SitesTable';
 import Link from 'next/link';
 
@@ -10,18 +11,16 @@ export default async function SitesPage() {
     const sites = await listSites();
 
     return (
-        <div>
-            <div className="flex items-center justify-between mb-6">
-                <div>
-                    <h1 className="text-2xl font-bold">Sites</h1>
-                    <p className="text-sm text-muted-foreground mt-1">
-                        Manage your WordPress sites
-                    </p>
-                </div>
-                <Link href="/sites/new">
-                    <Button>Add Site</Button>
-                </Link>
-            </div>
+        <div className="space-y-6">
+            <PageHeader
+                title="Sites"
+                subtitle="Manage your WordPress sites"
+                action={
+                    <Link href="/sites/new">
+                        <Button>Add Site</Button>
+                    </Link>
+                }
+            />
 
             <Card>
                 <CardContent className="p-0">
