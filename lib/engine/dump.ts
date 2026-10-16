@@ -16,7 +16,18 @@ export const DUMP_SCRIPT_PATH = path.join(process.cwd(), 'helpers', 'backup-wp.p
 const HTTP_TIMEOUT_MS = 10 * 60_000;
 const MIN_DUMP_BYTES = 1024;
 const RESPONSE_SNIPPET = 500;
-const SQL_MARKERS = ['MySQL dump', 'mysqldump', 'CREATE TABLE', 'INSERT INTO'];
+/** Window read at the head of the dump: a MariaDB header and its SET block push the first table past the first kilobyte. */
+const DUMP_HEAD_BYTES = 8192;
+/** `mysqldump` on MariaDB is `mariadb-dump`, whose header says "MariaDB dump" and names neither binary. */
+const SQL_MARKERS = [
+    'MySQL dump',
+    'MariaDB dump',
+    'mysqldump',
+    'mariadb-dump',
+    'DROP TABLE',
+    'CREATE TABLE',
+    'INSERT INTO',
+];
 const REMOTE_DUMP_NAME = /^db_[A-Za-z0-9_-]+\.sql$/;
 
 export class DumpError extends Error {
@@ -135,12 +146,16 @@ function validateDump(localPath: string): number {
         throw new DumpError(`Downloaded dump is missing or too small (${stat?.size ?? 0} bytes)`);
     }
     const fd = fs.openSync(localPath, 'r');
-    const head = Buffer.alloc(RESPONSE_SNIPPET);
+    const head = Buffer.alloc(DUMP_HEAD_BYTES);
     try {
         const read = fs.readSync(fd, head, 0, head.length, 0);
         const text = head.subarray(0, read).toString('utf8');
         if (!SQL_MARKERS.some((marker) => text.includes(marker))) {
-            throw new DumpError('Downloaded dump does not look like SQL');
+            // The first line tells an error page from a dump an unknown tool wrote, without opening the file on the server.
+            const firstLine = JSON.stringify(text.slice(0, 160).split('\n', 1)[0]);
+            throw new DumpError(
+                `Downloaded dump does not look like SQL, it starts with ${firstLine}`,
+            );
         }
     } finally {
         fs.closeSync(fd);

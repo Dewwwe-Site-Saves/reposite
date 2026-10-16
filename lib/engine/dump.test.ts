@@ -23,6 +23,34 @@ const site: SiteConfig = {
 
 const SQL = `-- MySQL dump 10.13\nCREATE TABLE wp_options (id int);\n${'INSERT INTO wp_options VALUES (1);\n'.repeat(50)}`;
 
+/** Header mariadb-dump writes: no "MySQL dump", no "mysqldump", and the first table past the first kilobyte. */
+const MARIADB_SQL = `/*M!999999\\- enable the sandbox mode */
+-- MariaDB dump 10.19-11.8.6-MariaDB, for debian-linux-gnu (x86_64)
+--
+-- Host: db.example.net    Database: wp_example
+-- ------------------------------------------------------
+-- Server version\t10.11.18-MariaDB-deb11-log
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET NAMES utf8mb4 */;
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+/*M!100616 SET @OLD_NOTE_VERBOSITY=@@NOTE_VERBOSITY, NOTE_VERBOSITY=0 */;
+
+--
+-- Table structure for table \`wp_options\`
+--
+
+DROP TABLE IF EXISTS \`wp_options\`;
+CREATE TABLE \`wp_options\` (\`option_id\` bigint(20) unsigned NOT NULL AUTO_INCREMENT);
+`;
+
 let workDir: string;
 let remote: FakeRemote;
 let localPath: string;
@@ -114,13 +142,30 @@ describe('dumpDatabase', () => {
         );
     });
 
-    it('rejects a dump that is not SQL and removes it from the remote', async () => {
+    it('accepts a mariadb-dump header, whose first table comes after the first kilobyte', async () => {
         stubEndpoint(() => {
-            remote.put('/www/db_wp_abcd1234.sql', `<br /><b>Warning</b>: ${'x'.repeat(2000)}`);
+            remote.put('/www/db_wp_abcd1234.sql', MARIADB_SQL);
+            return json(200, {
+                status: 'ok',
+                file: 'db_wp_abcd1234.sql',
+                size: MARIADB_SQL.length,
+            });
+        });
+        const result = await dumpDatabase(site, remote.client(), localPath, log);
+        expect(result.sizeBytes).toBe(MARIADB_SQL.length);
+        expect(MARIADB_SQL.indexOf('CREATE TABLE')).toBeGreaterThan(1000);
+    });
+
+    it('rejects a dump that is not SQL, quotes its first line and removes it from the remote', async () => {
+        stubEndpoint(() => {
+            remote.put(
+                '/www/db_wp_abcd1234.sql',
+                `<br /><b>Warning</b>: out of memory\n${'x'.repeat(10_000)}`,
+            );
             return json(200, { status: 'ok', file: 'db_wp_abcd1234.sql' });
         });
         await expect(dumpDatabase(site, remote.client(), localPath, log)).rejects.toThrow(
-            'does not look like SQL',
+            'does not look like SQL, it starts with "<br /><b>Warning</b>: out of memory"',
         );
         expect(remote.has('/www/db_wp_abcd1234.sql')).toBe(false);
     });
