@@ -32,7 +32,7 @@ export function SiteCard({ site }: { site: SiteWithLastBackup }) {
 
 function statusColor(status: string | null): string {
     if (!status) return 'var(--border)';
-    if (status === 'success') return '#22c55e';
-    if (status === 'error') return '#ef4444';
-    return '#f59e0b';
+    if (status === 'success') return 'var(--success)';
+    if (status === 'error') return 'var(--destructive)';
+    return 'var(--warning)';
 }

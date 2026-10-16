@@ -13,6 +13,6 @@ export function StatusBadge({ status }: { status: string | null }) {
         );
     }
     const variant =
-        status === 'success' ? 'default' : status === 'error' ? 'destructive' : 'secondary';
+        status === 'success' ? 'success' : status === 'error' ? 'destructive' : 'secondary';
     return <Badge variant={variant}>{status.toUpperCase()}</Badge>;
 }
