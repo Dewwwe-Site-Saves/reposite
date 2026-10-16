@@ -21,7 +21,7 @@ npm run typecheck
 npm test
 ```
 
-First start opens a setup page to create the admin account (email + password, 12 characters minimum), then lands on Settings: fill in the GitHub commit author and token first, the sites come next. The password can be changed from the Account section of Settings. Lost password:
+First start opens a setup page to create the admin account (email + password, 12 characters minimum), then lands on Settings. Settings is split in sections, one route each: Account (`/settings`), GitHub, SharePoint, Schedule & queue and Notifications. Fill in the GitHub author and token first (`/settings/github`), the sites come next. The password is changed from the Account section. Lost password:
 
 ```bash
 npx tsx scripts/reset-password.ts admin@example.com   # prints a generated password
@@ -40,13 +40,17 @@ Environment variables, see [.env.example](./.env.example):
 
 ### GitHub
 
-Fine-grained personal access token restricted to the backup repos, with `Contents: read/write` and `Metadata: read`. Stored encrypted, used for pushes and releases. The "Test token" button in Settings checks the token against GitHub and the push access to every site's repository; the commit author name and email are configured next to it.
+Fine-grained personal access token restricted to the backup repos, with `Contents: read/write` and `Metadata: read`. Stored encrypted, used for pushes and releases. The "Test token" button of the GitHub section checks the token against GitHub and the push access to every site's repository; the commit author name and email are configured next to it.
 
 > Backup repos must be **private**: they contain `wp-config.php` and the full database dump.
 
+### Schedule
+
+The Schedule & queue section carries the default cron expression for the sites without one, the number of concurrent backups and the history retention. Above the fields a strip shows the rule in plain English and the next firing, both computed in the container's `TZ`; a short reminder of the cron syntax sits under them. A site can override the expression from its own form.
+
 ### Notifications
 
-Settings has an SMTP block (host, port, TLS / STARTTLS / none, credentials, sender, recipients) and an "Errors" switch. When it is on, every failed run sends a mail with the error, the dates and the last lines of the log, and a restart that interrupts backups sends one mail listing them. "Send test mail" checks the block before saving. The password is stored encrypted, the switch cannot be turned on while the block is incomplete, and a mail that cannot be sent is only logged in the container output: notifications never affect a backup.
+The Notifications section of Settings has an SMTP block (host, port, TLS / STARTTLS / none, credentials, sender, recipients) and an "Errors" switch. When it is on, every failed run sends a mail with the error, the dates and the last lines of the log, and a restart that interrupts backups sends one mail listing them. "Send test mail" checks the block before saving. The password is stored encrypted, the switch cannot be turned on while the block is incomplete, and a mail that cannot be sent is only logged in the container output: notifications never affect a backup.
 
 ### SharePoint List update
 
