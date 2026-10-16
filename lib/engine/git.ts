@@ -119,6 +119,11 @@ export async function ensureRepo(ctx: GitContext, repoUrl: string, log: Logger):
     await git(['fetch', '--quiet', '--prune', 'origin'], ctx);
     // Discard any leftover from an interrupted run before switching branch.
     await git(['reset', '--quiet', '--hard'], ctx);
+    // `reset` only restores tracked files. An untracked leftover — a dump written by a run that
+    // never reached its commit — makes the checkout below abort rather than overwrite it. Ignored
+    // files are kept on purpose: the `.gitignore` of a clone lists what is never committed and
+    // would otherwise be downloaded again on every run.
+    await git(['clean', '--quiet', '-fd'], ctx);
 
     const branch = await remoteDefaultBranch(ctx);
     if (!branch) {

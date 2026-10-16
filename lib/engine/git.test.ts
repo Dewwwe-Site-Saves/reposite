@@ -120,6 +120,42 @@ describe('ensureRepo / commitAndTag / push', () => {
         ).toBe('main');
     });
 
+    // Reproduces a production failure: "The following untracked working tree files would be
+    // overwritten by checkout: db.sql". The dump of an interrupted run stayed untracked while the
+    // remote branch had since committed a file of the same name.
+    it('drops an untracked leftover that the incoming branch also carries', async () => {
+        await ensureRepo(ctx, bareRepo, log);
+        fs.writeFileSync(path.join(ctx.cwd, 'www.txt'), 'site');
+        const first = await commitAndTag(ctx, 'Backup 1', '20260903-210509', log);
+        await push(ctx, first.tag, log);
+
+        fs.writeFileSync(path.join(ctx.cwd, 'db.sql'), 'from the remote');
+        const second = await commitAndTag(ctx, 'Backup 2', '20260903-210510', log);
+        await push(ctx, second.tag, log);
+
+        // Local branch back to a commit without db.sql, and an untracked dump left in the tree.
+        execFileSync('git', ['-C', ctx.cwd, 'reset', '--hard', 'HEAD~1']);
+        fs.writeFileSync(path.join(ctx.cwd, 'db.sql'), 'leftover');
+
+        await ensureRepo(ctx, bareRepo, log);
+
+        expect(fs.readFileSync(path.join(ctx.cwd, 'db.sql'), 'utf8')).toBe('from the remote');
+    });
+
+    it('keeps the files the clone ignores, which are never committed', async () => {
+        await ensureRepo(ctx, bareRepo, log);
+        fs.writeFileSync(path.join(ctx.cwd, '.gitignore'), '*.mmdb\n');
+        const { tag } = await commitAndTag(ctx, 'Backup 1', '20260903-210509', log);
+        await push(ctx, tag, log);
+
+        // Too large for GitHub, downloaded on every run and deliberately left out of the commits.
+        fs.writeFileSync(path.join(ctx.cwd, 'geo.mmdb'), 'big');
+
+        await ensureRepo(ctx, bareRepo, log);
+
+        expect(fs.existsSync(path.join(ctx.cwd, 'geo.mmdb'))).toBe(true);
+    });
+
     it('re-clones when the folder exists without .git', async () => {
         fs.mkdirSync(ctx.cwd, { recursive: true });
         fs.writeFileSync(path.join(ctx.cwd, 'junk.txt'), 'x');
