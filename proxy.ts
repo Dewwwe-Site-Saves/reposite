@@ -31,6 +31,6 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 }
 
 export const config = {
-    // Everything except Next.js assets and the favicon.
-    matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+    // Everything except Next.js assets and the app icon, which the login page must be able to load without a session.
+    matcher: ['/((?!_next/static|_next/image|favicon.ico|icon.svg).*)'],
 };
