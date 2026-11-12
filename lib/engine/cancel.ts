@@ -4,21 +4,21 @@
  * soon as the signal fires.
  */
 
-export class BackupCancelledError extends Error {
+export class RunCancelledError extends Error {
     constructor() {
-        super('Backup cancelled');
-        this.name = 'BackupCancelledError';
+        super('Run cancelled');
+        this.name = 'RunCancelledError';
     }
 }
 
 export function throwIfAborted(signal?: AbortSignal): void {
-    if (signal?.aborted) throw new BackupCancelledError();
+    if (signal?.aborted) throw new RunCancelledError();
 }
 
 /** True for our own cancellation error and for Node's AbortError (execFile, fetch). */
 export function isCancellation(error: unknown): boolean {
     return (
-        error instanceof BackupCancelledError ||
+        error instanceof RunCancelledError ||
         (error instanceof Error && error.name === 'AbortError')
     );
 }
@@ -26,9 +26,9 @@ export function isCancellation(error: unknown): boolean {
 /** Rejects as soon as the signal fires, even if the wrapped promise never settles. */
 export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
     if (!signal) return promise;
-    if (signal.aborted) return Promise.reject(new BackupCancelledError());
+    if (signal.aborted) return Promise.reject(new RunCancelledError());
     return new Promise<T>((resolve, reject) => {
-        const onAbort = () => reject(new BackupCancelledError());
+        const onAbort = () => reject(new RunCancelledError());
         signal.addEventListener('abort', onAbort, { once: true });
         promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
     });

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { BackupCancelledError, errorMessage, throwIfAborted } from './cancel';
+import { RunCancelledError, errorMessage, throwIfAborted } from './cancel';
 import type { RemoteClient } from './remote/client';
 import { remoteRootFile } from './remote';
 import { DUMP_SCRIPT_NAME, TOKEN_FILE_NAME, isSafePath } from './sync';
@@ -106,7 +106,7 @@ async function triggerDump(domain: string, token: string, signal?: AbortSignal):
             signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
     } catch (error) {
-        if (signal?.aborted) throw new BackupCancelledError();
+        if (signal?.aborted) throw new RunCancelledError();
         if (error instanceof Error && error.name === 'TimeoutError')
             throw new DumpError(`Dump request timed out after ${HTTP_TIMEOUT_MS / 60_000} min`);
         throw new DumpError(`Dump request failed: ${errorMessage(error)}`);

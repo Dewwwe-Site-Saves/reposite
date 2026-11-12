@@ -1,5 +1,5 @@
 /**
- * Contracts between the database layer, the job queue and the backup engine. The engine
+ * Contracts between the database layer, the job queue and the engine. The engine
  * only ever sees these decrypted, validated objects, never Prisma models.
  */
 
@@ -65,7 +65,7 @@ export interface Logger {
 
 export type TriggerType = 'manual' | 'scheduled';
 
-export type BackupOutcome = 'success' | 'error' | 'cancelled';
+export type RunOutcome = 'success' | 'error' | 'cancelled';
 
 export interface BackupOptions {
     /** Absolute path of the site's clone (`<FILES_DIR>/<repo>`). */
@@ -91,7 +91,7 @@ export interface SyncStats {
 }
 
 export interface BackupResult {
-    status: BackupOutcome;
+    status: RunOutcome;
     startedAt: Date;
     finishedAt: Date;
     durationMs: number;

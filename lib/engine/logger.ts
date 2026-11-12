@@ -6,7 +6,7 @@ export interface BufferedLogger extends Logger {
     text(): string;
 }
 
-/** One line per entry: `<time> [<level>] <message>`. The format stored in `Backup.log`. */
+/** One line per entry: `<time> [<level>] <message>`. The format stored in `Job.log`. */
 export function formatLog(entries: readonly LogEntry[]): string {
     return entries.map((e) => `${e.time} [${e.level}] ${e.msg}`).join('\n');
 }

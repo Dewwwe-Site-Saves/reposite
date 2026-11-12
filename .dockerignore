@@ -24,3 +24,4 @@ prisma/*.db*
 .DS_Store
 *.md
 scripts/smoke-sync.ts
+scripts/smoke-inventory.ts

@@ -16,6 +16,8 @@ export interface RemoteEntry {
 export interface RemoteClient {
     list(dir: string): Promise<RemoteEntry[]>;
     download(remotePath: string, localPath: string): Promise<void>;
+    /** Whole file in memory, for the few small files the inventory parses. The caller checks the size in a listing first. */
+    read(remotePath: string): Promise<Buffer>;
     upload(content: Buffer, remotePath: string): Promise<void>;
     remove(remotePath: string): Promise<void>;
     close(): Promise<void>;

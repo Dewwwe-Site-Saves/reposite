@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { BackupCancelledError } from './cancel';
+import { RunCancelledError } from './cancel';
 import type { Logger } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -76,7 +76,7 @@ export async function git(args: string[], ctx: GitContext, cwd = ctx.cwd): Promi
 
 /** Builds an error from stderr only: the command line (and its environment) never leaks. */
 function toGitError(error: ExecError, command: string, token: string | null): Error {
-    if (error.name === 'AbortError') return new BackupCancelledError();
+    if (error.name === 'AbortError') return new RunCancelledError();
     let detail = (error.stderr ?? '').trim();
     if (token) detail = detail.replaceAll(token, '***');
     if (detail.length > 1000) detail = `${detail.slice(0, 1000)}…`;

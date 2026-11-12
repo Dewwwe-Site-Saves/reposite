@@ -1,4 +1,4 @@
-import { BackupCancelledError, errorMessage, isCancellation, throwIfAborted } from '../cancel';
+import { RunCancelledError, errorMessage, isCancellation, throwIfAborted } from '../cancel';
 import type { Logger } from '../types';
 import type { RemoteClient, RemoteClientFactory } from './client';
 
@@ -37,10 +37,10 @@ export async function openClient(
 /** Resolves after `ms`, rejects at once with the cancellation error when the signal fires. */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
-        if (signal?.aborted) return reject(new BackupCancelledError());
+        if (signal?.aborted) return reject(new RunCancelledError());
         const onAbort = () => {
             clearTimeout(timer);
-            reject(new BackupCancelledError());
+            reject(new RunCancelledError());
         };
         const timer = setTimeout(() => {
             signal?.removeEventListener('abort', onAbort);

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BackupCancelledError } from './cancel';
+import { RunCancelledError } from './cancel';
 import { createLogger } from './logger';
 import type { RemoteClientFactory } from './remote/client';
 import {
@@ -155,7 +155,7 @@ describe('scanRemote', () => {
         controller.abort();
         await expect(
             scanRemote([remote.client()], '/www', log, controller.signal),
-        ).rejects.toBeInstanceOf(BackupCancelledError);
+        ).rejects.toBeInstanceOf(RunCancelledError);
     });
 });
 

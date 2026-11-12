@@ -10,7 +10,7 @@ import { updateSharePointItem } from './sharepoint';
 import { GITIGNORE_TEMPLATE, isBackupArtifact, syncFiles } from './sync';
 import type {
     BackupOptions,
-    BackupOutcome,
+    RunOutcome,
     BackupResult,
     GithubConfig,
     Logger,
@@ -39,7 +39,7 @@ export async function runBackup(
     let commitSha: string | null = null;
     let tag: string | null = null;
     let releaseUrl: string | null = null;
-    let status: BackupOutcome = 'success';
+    let status: RunOutcome = 'success';
     let errorText: string | null = null;
 
     const gitCtx: GitContext = {

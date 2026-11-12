@@ -71,6 +71,13 @@ class SftpRemoteClient implements RemoteClient {
         await this.client.fastGet(this.real(remotePath), localPath);
     }
 
+    async read(remotePath: string): Promise<Buffer> {
+        // Without a destination, `get` resolves with the content.
+        const content = await this.client.get(this.real(remotePath));
+        if (!Buffer.isBuffer(content)) throw new Error(`Could not read ${remotePath} into memory`);
+        return content;
+    }
+
     async upload(content: Buffer, remotePath: string): Promise<void> {
         await this.client.put(content, this.real(remotePath));
     }

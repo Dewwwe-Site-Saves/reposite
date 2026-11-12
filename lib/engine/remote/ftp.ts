@@ -1,4 +1,4 @@
-import { Readable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
 import { Client, enterPassiveModeIPv4 } from 'basic-ftp';
 import type { ConnectionConfig } from '../types';
 import type { RemoteClient, RemoteClientFactory, RemoteEntry } from './client';
@@ -51,6 +51,18 @@ class FtpClient implements RemoteClient {
 
     async download(remotePath: string, localPath: string): Promise<void> {
         await this.client.downloadTo(localPath, remotePath);
+    }
+
+    async read(remotePath: string): Promise<Buffer> {
+        const chunks: Buffer[] = [];
+        const sink = new Writable({
+            write(chunk: Buffer, _encoding, callback) {
+                chunks.push(chunk);
+                callback();
+            },
+        });
+        await this.client.downloadTo(sink, remotePath);
+        return Buffer.concat(chunks);
     }
 
     async upload(content: Buffer, remotePath: string): Promise<void> {

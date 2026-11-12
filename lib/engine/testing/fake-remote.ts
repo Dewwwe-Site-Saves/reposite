@@ -12,6 +12,7 @@ export class FakeRemote {
     readonly files = new Map<string, FakeFile>();
     readonly unlistable = new Set<string>();
     readonly undownloadable = new Set<string>();
+    readonly reads: string[] = [];
     readonly uploads: string[] = [];
     readonly removals: string[] = [];
 
@@ -66,6 +67,13 @@ export class FakeRemote {
                 fs.mkdirSync(path.dirname(localPath), { recursive: true });
                 fs.writeFileSync(localPath, file.content);
                 fs.utimesSync(localPath, file.mtime, file.mtime);
+            },
+            read: async (remotePath) => {
+                this.reads.push(remotePath);
+                if (this.undownloadable.has(remotePath)) throw new Error('Transfer failed');
+                const file = this.files.get(remotePath);
+                if (!file) throw new Error('No such file');
+                return file.content;
             },
             upload: async (content, remotePath) => {
                 this.uploads.push(remotePath);

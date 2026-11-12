@@ -24,6 +24,10 @@ vi.mock('ssh2-sftp-client', () => ({
         fastGet = async (p: string) => {
             server.calls.push(['fastGet', p]);
         };
+        get = async (p: string) => {
+            server.calls.push(['get', p]);
+            return Buffer.from('<?php');
+        };
         put = async (_content: Buffer, p: string) => {
             server.calls.push(['put', p]);
         };
@@ -69,6 +73,17 @@ describe('SftpRemoteClient', () => {
             ['/www/index.php', 'file'],
             ['/www/wp-content', 'dir'],
         ]);
+    });
+
+    it('reads a file into memory from under the login directory', async () => {
+        server.home = '/home/user';
+        server.calls = [];
+        const client = await createSftpFactory(site).create();
+
+        const content = await client.read('/www/wp-includes/version.php');
+
+        expect(server.calls).toEqual([['get', '/home/user/www/wp-includes/version.php']]);
+        expect(content.toString()).toBe('<?php');
     });
 
     it('is a no-op for a chrooted account', async () => {

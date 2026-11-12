@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BackupCancelledError } from './cancel';
+import { RunCancelledError } from './cancel';
 import { dumpDatabase } from './dump';
 import { createLogger } from './logger';
 import { FakeRemote } from './testing/fake-remote';
@@ -197,7 +197,7 @@ describe('dumpDatabase', () => {
         });
         await expect(
             dumpDatabase(site, remote.client(), localPath, log, controller.signal),
-        ).rejects.toBeInstanceOf(BackupCancelledError);
+        ).rejects.toBeInstanceOf(RunCancelledError);
         expect(remote.has('/www/dewwwe-backup.php')).toBe(false);
     });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BackupCancelledError } from '../cancel';
+import { RunCancelledError } from '../cancel';
 import { createLogger } from '../logger';
 import type { RemoteClient, RemoteClientFactory } from './client';
 import { openClient } from './connect';
@@ -36,14 +36,14 @@ describe('openClient', () => {
 
     it('never retries a cancellation', async () => {
         const create = vi.fn(async () => {
-            throw new BackupCancelledError();
+            throw new RunCancelledError();
         });
         await expect(
             openClient(
                 { poolSize: 1, create },
                 { log: createLogger('[test]'), retryDelaysMs: [1] },
             ),
-        ).rejects.toBeInstanceOf(BackupCancelledError);
+        ).rejects.toBeInstanceOf(RunCancelledError);
         expect(create).toHaveBeenCalledTimes(1);
     });
 
@@ -57,7 +57,7 @@ describe('openClient', () => {
         });
         await vi.waitFor(() => expect(factory.create).toHaveBeenCalledTimes(1));
         controller.abort();
-        await expect(pending).rejects.toBeInstanceOf(BackupCancelledError);
+        await expect(pending).rejects.toBeInstanceOf(RunCancelledError);
         expect(factory.create).toHaveBeenCalledTimes(1);
     });
 });
