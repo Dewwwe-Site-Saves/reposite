@@ -36,7 +36,7 @@ export function InventoryComponentsTable({ components }: { components: Component
             <div className="flex flex-wrap items-center gap-3 border-b border-border p-3">
                 <Input
                     aria-label="Search a component"
-                    placeholder="Search a plugin or a theme"
+                    placeholder="Search a plugin, a module or a theme"
                     className="w-64"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}

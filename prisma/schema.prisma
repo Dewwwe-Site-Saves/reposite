@@ -35,7 +35,7 @@ model Site {
   jobs         Job[]
 
   // Inventory: what runs on the site, as last read from its files
-  cms                   String? // detected: wordpress
+  cms                   String? // detected: wordpress | prestashop
   cmsVersion            String?
   inventoryAt           DateTime? // last complete inventory, from a backup or an inventory run
   inventoryEnabled      Boolean         @default(true)
@@ -48,7 +48,7 @@ model SiteComponent {
   id      Int     @id @default(autoincrement())
   site    Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
   siteId  Int
-  type    String // plugin | mu-plugin | theme
+  type    String // plugin | mu-plugin | module | theme
   slug    String // directory name, or file name without extension
   name    String
   version String?

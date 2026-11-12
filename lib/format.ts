@@ -31,5 +31,6 @@ export function cmsLabel(cms: string): string {
 export const COMPONENT_TYPE_LABELS: Record<ComponentType, string> = {
     plugin: 'Plugins',
     'mu-plugin': 'Must-use plugins',
+    module: 'Modules',
     theme: 'Themes',
 };

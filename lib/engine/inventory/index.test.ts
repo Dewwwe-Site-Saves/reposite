@@ -69,7 +69,7 @@ describe('runInventory', () => {
                 { type: 'theme', slug: 'classic', name: 'Classic', version: '1.4' },
             ],
         });
-        expect(result.log).toContain('WordPress 6.4.3, 1 plugin, 0 mu-plugin, 1 theme');
+        expect(result.log).toContain('WordPress 6.4.3, 1 plugin, 1 theme');
     });
 
     it('reads one file per conventional plugin and never the stock index.php', async () => {
@@ -128,6 +128,63 @@ describe('runInventory', () => {
         expect(inventory?.components.map((component) => component.slug)).toEqual([
             'forms',
             'classic',
+        ]);
+    });
+
+    it('reads the core version, the modules and the themes of a PrestaShop site', async () => {
+        remote.put('/www/index.php', '<?php');
+        for (const dir of ['classes', 'config']) remote.put(`/www/${dir}/index.php`, '<?php');
+        remote.put(
+            '/www/app/AppKernel.php',
+            [
+                '<?php',
+                'class AppKernel extends Kernel {',
+                '    const VERSION = Version::VERSION;',
+                '    const MAJOR_VERSION_STRING = Version::MAJOR_VERSION_STRING;',
+                '    const MAJOR_VERSION = 8;',
+                '    const MINOR_VERSION = 2;',
+                '    const RELEASE_VERSION = 3;',
+                '}',
+            ].join('\n'),
+        );
+        remote.put('/www/modules/index.php', '<?php');
+        remote.put(
+            '/www/modules/ps_banner/ps_banner.php',
+            [
+                '<?php',
+                ' * versions in the future.',
+                "        $this->version = '2.1.2';",
+                "        $this->displayName = $this->trans('Banner', [], 'Modules.Banner.Admin');",
+                "        $this->ps_versions_compliancy = ['min' => '1.7.1.0', 'max' => _PS_VERSION_];",
+            ].join('\n'),
+        );
+        remote.put('/www/modules/ps_banner/config.xml', '<module/>');
+        remote.put('/www/modules/__MACOSX/ps_banner/._ps_banner.php', 'resource fork');
+        remote.put('/www/themes/index.php', '<?php');
+        remote.put('/www/themes/core.js', '// not a theme');
+        remote.put('/www/themes/_libraries/readme.txt', 'not a theme');
+        remote.put(
+            '/www/themes/classic/config/theme.yml',
+            'name: classic\ndisplay_name: Classic\nversion: 2.2.0\nauthor:\n  name: "Someone"\n',
+        );
+
+        const result = await runInventory(site);
+
+        expect(result.errorMessage).toBeNull();
+        expect(result.inventory).toEqual({
+            cms: 'prestashop',
+            version: '8.2.3',
+            components: [
+                { type: 'module', slug: 'ps_banner', name: 'Banner', version: '2.1.2' },
+                { type: 'theme', slug: 'classic', name: 'Classic', version: '2.2.0' },
+            ],
+        });
+        expect(result.log).toContain('PrestaShop 8.2.3, 1 module, 1 theme');
+        // One read per module and per theme, plus the kernel.
+        expect(remote.reads).toEqual([
+            '/www/app/AppKernel.php',
+            '/www/modules/ps_banner/ps_banner.php',
+            '/www/themes/classic/config/theme.yml',
         ]);
     });
 

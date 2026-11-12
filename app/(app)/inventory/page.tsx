@@ -43,7 +43,7 @@ export default async function InventorySitesPage() {
                                 <TableRow>
                                     <TableHead>Site</TableHead>
                                     <TableHead>CMS</TableHead>
-                                    <TableHead>Plugins</TableHead>
+                                    <TableHead>Plugins / modules</TableHead>
                                     <TableHead className="hidden sm:table-cell">Themes</TableHead>
                                     <TableHead>Last read</TableHead>
                                 </TableRow>
@@ -55,6 +55,9 @@ export default async function InventorySitesPage() {
                                         site.cmsVersion !== null &&
                                         site.cmsVersion !== newestCore.get(site.cms);
                                     const mustUse = site.counts['mu-plugin'] ?? 0;
+                                    // WordPress calls them plugins, PrestaShop modules: one column, a site has one or the other.
+                                    const extensions =
+                                        (site.counts.plugin ?? 0) + (site.counts.module ?? 0);
                                     return (
                                         <TableRow key={site.id}>
                                             <TableCell className="font-medium">
@@ -78,7 +81,7 @@ export default async function InventorySitesPage() {
                                                 )}
                                             </TableCell>
                                             <TableCell className="text-muted-foreground">
-                                                {site.inventoryAt ? (site.counts.plugin ?? 0) : '-'}
+                                                {site.inventoryAt ? extensions : '-'}
                                                 {mustUse > 0 && ` + ${mustUse} must-use`}
                                             </TableCell>
                                             <TableCell className="hidden text-muted-foreground sm:table-cell">

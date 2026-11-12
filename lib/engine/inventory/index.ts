@@ -12,15 +12,16 @@ import type {
     InventoryReader,
     InventoryResult,
 } from './types';
+import { prestashop } from './prestashop';
 import { wordpress } from './wordpress';
 
 export { createLocalReader, createRemoteReader } from './reader';
 export * from './types';
 
 /** Tried in order, the first whose `detect` accepts the web root reads the site. */
-const ADAPTERS: readonly CmsAdapter[] = [wordpress];
+const ADAPTERS: readonly CmsAdapter[] = [wordpress, prestashop];
 
-const TYPE_ORDER: readonly Component['type'][] = ['plugin', 'mu-plugin', 'theme'];
+const TYPE_ORDER: readonly Component['type'][] = ['plugin', 'mu-plugin', 'module', 'theme'];
 
 /**
  * Detects the CMS behind a reader and reads its version and components. Throws on anything that keeps the inventory from being complete. `where` names the place being read, for the log and the error.
@@ -100,8 +101,12 @@ function sortComponents(components: readonly Component[]): Component[] {
     );
 }
 
+/** `10 plugin, 1 mu-plugin, 5 theme`: the types that have something, in display order. */
 function describeComponents(components: readonly Component[]): string {
-    return TYPE_ORDER.map(
-        (type) => `${components.filter((component) => component.type === type).length} ${type}`,
-    ).join(', ');
+    const counts = TYPE_ORDER.map((type) => ({
+        type,
+        count: components.filter((component) => component.type === type).length,
+    })).filter(({ count }) => count > 0);
+    if (counts.length === 0) return 'no component';
+    return counts.map(({ type, count }) => `${count} ${type}`).join(', ');
 }

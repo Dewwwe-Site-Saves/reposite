@@ -1,12 +1,16 @@
 import type { LogEntry, RunOutcome } from '../types';
 
 /** CMS the inventory knows how to read, one adapter each. */
-export type CmsId = 'wordpress';
+export type CmsId = 'wordpress' | 'prestashop';
 
 /** Product names, for the log and the interface. */
-export const CMS_LABELS: Record<CmsId, string> = { wordpress: 'WordPress' };
+export const CMS_LABELS: Record<CmsId, string> = {
+    wordpress: 'WordPress',
+    prestashop: 'PrestaShop',
+};
 
-export type ComponentType = 'plugin' | 'mu-plugin' | 'theme';
+/** WordPress has plugins and must-use plugins, PrestaShop has modules, both have themes. */
+export type ComponentType = 'plugin' | 'mu-plugin' | 'module' | 'theme';
 
 export interface Component {
     type: ComponentType;
