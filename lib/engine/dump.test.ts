@@ -19,6 +19,7 @@ const site: SiteConfig = {
     password: 'p',
     webRootPath: 'www',
     spListItemId: null,
+    inventoryEnabled: false,
 };
 
 const SQL = `-- MySQL dump 10.13\nCREATE TABLE wp_options (id int);\n${'INSERT INTO wp_options VALUES (1);\n'.repeat(50)}`;

@@ -54,6 +54,11 @@ function site(id: number, overrides: Partial<SiteSummary> = {}): SiteSummary {
         enabled: true,
         createdAt: new Date(),
         updatedAt: new Date(),
+        cms: null,
+        cmsVersion: null,
+        inventoryAt: null,
+        inventoryEnabled: true,
+        inventoryCronSchedule: null,
         ...overrides,
     };
 }

@@ -4,6 +4,7 @@ import type { Job, Settings, Site, User } from './generated/prisma/client';
 import type { Role } from './auth';
 import { decrypt, encrypt } from './crypto';
 import { DEFAULT_AUTHOR_NAME } from './engine/git';
+import type { Inventory } from './engine/inventory/types';
 import type { GithubConfig, Protocol, SharePointConfig, SiteConfig } from './engine/types';
 import type { MailConfig } from './notifications/mailer';
 import { spCertDir } from './paths';
@@ -84,6 +85,11 @@ export const siteSelect = {
     enabled: true,
     createdAt: true,
     updatedAt: true,
+    cms: true,
+    cmsVersion: true,
+    inventoryAt: true,
+    inventoryEnabled: true,
+    inventoryCronSchedule: true,
 } satisfies Prisma.SiteSelect;
 
 export type SiteSummary = Omit<Site, 'passwordEnc'>;
@@ -129,7 +135,12 @@ export async function listSitesWithLastBackup(): Promise<SiteWithLastBackup[]> {
     const sites = await prisma.site.findMany({
         select: {
             ...siteSelect,
-            jobs: { orderBy: { queuedAt: 'desc' }, take: 1, omit: { log: true } },
+            jobs: {
+                where: { kind: 'backup' },
+                orderBy: { queuedAt: 'desc' },
+                take: 1,
+                omit: { log: true },
+            },
         },
         orderBy: { domain: 'asc' },
     });
@@ -205,6 +216,26 @@ export async function listActiveJobs(): Promise<ActiveJob[]> {
     }));
 }
 
+// ============ Inventory ============
+
+/** Stores a complete inventory: the CMS and its version on the site row, the components replaced as a whole. One batch, so a reader never sees half of it. Rejects when the site is gone. */
+export async function saveInventory(
+    siteId: number,
+    inventory: Inventory,
+    readAt: Date,
+): Promise<void> {
+    await prisma.$transaction([
+        prisma.site.update({
+            where: { id: siteId },
+            data: { cms: inventory.cms, cmsVersion: inventory.version, inventoryAt: readAt },
+        }),
+        prisma.siteComponent.deleteMany({ where: { siteId } }),
+        prisma.siteComponent.createMany({
+            data: inventory.components.map((component) => ({ siteId, ...component })),
+        }),
+    ]);
+}
+
 // ============ Settings ============
 
 /** The singleton row, created with defaults on first access. A plain read afterwards: `upsert` would take a write transaction on every call. */
@@ -265,6 +296,7 @@ export async function getSiteConfig(id: number): Promise<SiteConfig | null> {
         password: decrypt(site.passwordEnc),
         webRootPath: site.webRootPath,
         spListItemId: site.spListItemId,
+        inventoryEnabled: site.inventoryEnabled,
     };
 }
 

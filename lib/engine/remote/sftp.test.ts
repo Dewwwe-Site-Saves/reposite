@@ -50,6 +50,7 @@ const site: SiteConfig = {
     password: 'p',
     webRootPath: 'www',
     spListItemId: null,
+    inventoryEnabled: false,
 };
 
 describe('SftpRemoteClient', () => {

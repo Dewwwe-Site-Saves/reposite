@@ -1,3 +1,4 @@
+import type { JobKind } from '../constants';
 import type { Mail } from './mailer';
 
 /**
@@ -10,6 +11,7 @@ const SUBJECT_PREFIX = '[Reposite]';
 export const LOG_TAIL_LINES = 30;
 
 export interface FailureMailInput {
+    kind: JobKind;
     domain: string;
     siteId: number;
     jobId: number;
@@ -41,11 +43,21 @@ export function failureMail(input: FailureMailInput): Mail {
         ['Duration', input.durationMs === null ? '-' : formatDuration(input.durationMs)],
         ['Error', input.errorMessage ?? 'Unknown error'],
     ];
-    const link = input.appUrl ? `${input.appUrl}/history?siteId=${input.siteId}` : null;
+    const inventory = input.kind === 'inventory';
+    const what = inventory ? 'Inventory' : 'Backup';
+    // The history hides inventories unless asked for them.
+    const link = input.appUrl
+        ? `${input.appUrl}/history?siteId=${input.siteId}${inventory ? '&kind=inventory' : ''}`
+        : null;
     const tail = logTail(input.log);
+    // An inventory runs every day: only the first failure of a series is mailed.
+    const note = inventory
+        ? 'No other mail will follow until an inventory of this site succeeds again.'
+        : null;
 
     const text = [
-        `Backup #${input.jobId} of ${input.domain} failed.`,
+        `${what} #${input.jobId} of ${input.domain} failed.`,
+        ...(note ? [note] : []),
         '',
         ...rows.map(([label, value]) => `${label}: ${value}`),
         ...(link ? ['', `History: ${link}`] : []),
@@ -53,7 +65,8 @@ export function failureMail(input: FailureMailInput): Mail {
     ].join('\n');
 
     const html = [
-        `<p>Backup #${input.jobId} of <strong>${escapeHtml(input.domain)}</strong> failed.</p>`,
+        `<p>${what} #${input.jobId} of <strong>${escapeHtml(input.domain)}</strong> failed.</p>`,
+        note ? `<p>${note}</p>` : '',
         table(rows),
         link ? `<p><a href="${escapeHtml(link)}">Open the history</a></p>` : '',
         tail.length > 0
@@ -61,7 +74,7 @@ export function failureMail(input: FailureMailInput): Mail {
             : '',
     ].join('\n');
 
-    return { subject: `${SUBJECT_PREFIX} Backup failed: ${input.domain}`, text, html };
+    return { subject: `${SUBJECT_PREFIX} ${what} failed: ${input.domain}`, text, html };
 }
 
 export function interruptedMail(input: InterruptedMailInput): Mail {

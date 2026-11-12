@@ -4,6 +4,7 @@ import { errorMessage, isCancellation, throwIfAborted } from './cancel';
 import { DUMP_FILE_NAME, dumpDatabase } from './dump';
 import { commitAndTag, ensureRepo, formatTag, push, type GitContext } from './git';
 import { createRelease, formatReleaseBody, parseRepoUrl } from './github';
+import { createLocalReader, readInventory, type Inventory } from './inventory';
 import { createLogger } from './logger';
 import { createRemoteFactory, openClient, remoteRootDir, type RemoteClient } from './remote';
 import { updateSharePointItem } from './sharepoint';
@@ -16,6 +17,7 @@ import type {
     Logger,
     SharePointConfig,
     SiteConfig,
+    SyncStats,
 } from './types';
 
 /** Workflow the v1 engine committed into every backup repo; Releases are now created by the app. */
@@ -39,6 +41,7 @@ export async function runBackup(
     let commitSha: string | null = null;
     let tag: string | null = null;
     let releaseUrl: string | null = null;
+    let inventory: Inventory | null = null;
     let status: RunOutcome = 'success';
     let errorText: string | null = null;
 
@@ -92,7 +95,14 @@ export async function runBackup(
         stats.filesDeleted = sync.deleted;
         throwIfAborted(signal);
 
-        // 5 + 6. Snapshot and its Release.
+        // 5. Inventory, read from the files just synced: not one request to the site.
+        if (site.inventoryEnabled) {
+            const webRoot = path.join(localRoot, site.webRootPath);
+            inventory = await readSyncedInventory(webRoot, sync, log, signal);
+            throwIfAborted(signal);
+        }
+
+        // 6 + 7. Snapshot and its Release.
         if (options.skipGit) {
             log.info('Skipping commit and push');
         } else {
@@ -135,7 +145,7 @@ export async function runBackup(
         }
     }
 
-    // 7. Tracking list, only for a complete snapshot.
+    // 8. Tracking list, only for a complete snapshot.
     if (status === 'success' && sharepoint && site.spListItemId) {
         try {
             await updateSharePointItem(sharepoint, site.spListItemId, log);
@@ -158,6 +168,7 @@ export async function runBackup(
         commitSha,
         tag,
         releaseUrl,
+        inventory,
         errorMessage: errorText,
         log: log.text(),
     };
@@ -194,6 +205,27 @@ function prepareLocalTree(localRoot: string, site: SiteConfig, log: Logger): voi
     if (!fs.existsSync(gitignore)) {
         log.info('Adding .gitignore');
         fs.writeFileSync(gitignore, GITIGNORE_TEMPLATE);
+    }
+}
+
+/** A warning at worst: the snapshot matters more than its description. Not attempted when the sync left files behind, since a component whose main file is stale or missing would be reported wrong or not at all. */
+async function readSyncedInventory(
+    webRoot: string,
+    sync: SyncStats,
+    log: Logger,
+    signal: AbortSignal | undefined,
+): Promise<Inventory | null> {
+    if (sync.failed > 0 || sync.listErrors > 0) {
+        log.warn('Inventory skipped: the sync was incomplete');
+        return null;
+    }
+    try {
+        const reader = createLocalReader(webRoot, { log, signal });
+        return await readInventory(reader, log, 'the synced files');
+    } catch (error) {
+        if (isCancellation(error)) throw error;
+        log.warn(`Inventory failed: ${errorMessage(error)}`);
+        return null;
     }
 }
 

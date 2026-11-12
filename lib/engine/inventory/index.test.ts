@@ -25,6 +25,7 @@ const site: SiteConfig = {
     password: 'secret',
     webRootPath: 'www',
     spListItemId: null,
+    inventoryEnabled: true,
 };
 
 const PLUGINS = '/www/wp-content/plugins';

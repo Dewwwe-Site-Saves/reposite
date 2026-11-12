@@ -4,6 +4,7 @@ import { LOG_TAIL_LINES, failureMail, interruptedMail, testMail } from './templa
 const base = {
     domain: 'site.test',
     siteId: 7,
+    kind: 'backup' as const,
     jobId: 42,
     triggerType: 'scheduled',
     startedAt: new Date('2026-09-06T00:00:00Z'),

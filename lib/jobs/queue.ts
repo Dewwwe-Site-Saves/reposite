@@ -1,20 +1,32 @@
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
-import { getGithubConfig, getSettings, getSharePointConfig, getSite, getSiteConfig } from '../db';
+import {
+    getGithubConfig,
+    getSettings,
+    getSharePointConfig,
+    getSite,
+    getSiteConfig,
+    saveInventory,
+} from '../db';
 import { runBackup } from '../engine/backup';
 import { errorMessage } from '../engine/cancel';
+import { runInventory, type Inventory } from '../engine/inventory';
 import { formatLog } from '../engine/logger';
-import type { LogEntry } from '../engine/types';
+import type { LogEntry, SiteConfig } from '../engine/types';
 import { filesDir } from '../paths';
 import { prisma } from '../prisma';
-import { ACTIVE_STATUSES, type JobStatus, type TriggerType } from '../validation';
+import { ACTIVE_STATUSES, type JobKind, type JobStatus, type TriggerType } from '../validation';
 
 /**
- * DB-first job queue. The `Job` row is the job: created as `pending` at enqueue time, claimed as `running` by the worker loop, updated with the engine result at the end. The only in-memory state is what cannot live in the database, the AbortController and the log buffer of the runs in progress, so a restart leaves nothing behind except rows to sweep.
+ * DB-first job queue. The `Job` row is the job: created as `pending` at enqueue time, claimed as `running` by the worker loop, updated with the engine result at the end. Its `kind` picks the engine entry point: `runBackup` or `runInventory`. The only in-memory state is what cannot live in the database, the AbortController and the log buffer of the runs in progress, so a restart leaves nothing behind except rows to sweep.
  */
 
 export interface EnqueueOptions {
+    /** `backup` when omitted. */
+    kind?: JobKind;
+    /** Backups only. */
     fullDownload?: boolean;
+    /** Backups only. */
     skipGit?: boolean;
     triggerType?: TriggerType;
 }
@@ -44,15 +56,15 @@ export interface JobListeners {
 }
 
 export interface Subscription {
-    /** Lines buffered before the subscription: empty for a pending backup and once the run is over. */
+    /** Lines buffered before the subscription: empty for a pending job and once the run is over. */
     lines: readonly LogEntry[];
     unsubscribe: () => void;
 }
 
-/** Thrown by `enqueue` when the site already has a pending or running backup. */
+/** Thrown by `enqueue` when the site already has a pending or running job, of any kind: two runs on one site would compete for the few connections its host allows. */
 export class JobConflictError extends Error {
     constructor(siteId: number) {
-        super(`A backup is already pending or running for site ${siteId}`);
+        super(`A job is already pending or running for site ${siteId}`);
         this.name = 'JobConflictError';
     }
 }
@@ -67,6 +79,7 @@ interface RunningJob {
 interface PendingRow {
     id: number;
     siteId: number;
+    kind: string;
     triggerType: string;
     fullDownload: boolean;
     skipGit: boolean;
@@ -92,11 +105,11 @@ const state: QueueState = (globalForQueue.jobQueue ??= {
 });
 state.events.setMaxListeners(100);
 
-/** `log` and `status` while a run is in progress, `done` once its final status is stored. Prefer `subscribe` for a single backup. */
+/** `log` and `status` while a run is in progress, `done` once its final status is stored. Prefer `subscribe` for a single job. */
 export const events = state.events;
 
 /**
- * Creates the `pending` Job row and returns its id. Rejects with `JobConflictError` when the site already has an active backup. The check and the insert run under an in-process lock rather than a database transaction: the app is a single process, so the lock is enough, and it keeps the queue off Prisma interactive transactions on the single-connection better-sqlite3 adapter.
+ * Creates the `pending` Job row and returns its id. Rejects with `JobConflictError` when the site already has an active job. The check and the insert run under an in-process lock rather than a database transaction: the app is a single process, so the lock is enough, and it keeps the queue off Prisma interactive transactions on the single-connection better-sqlite3 adapter.
  */
 export async function enqueue(siteId: number, options: EnqueueOptions = {}): Promise<number> {
     const insert = () => insertPending(siteId, options);
@@ -119,6 +132,7 @@ async function insertPending(siteId: number, options: EnqueueOptions): Promise<n
     const created = await prisma.job.create({
         data: {
             siteId,
+            kind: options.kind ?? 'backup',
             triggerType: options.triggerType ?? 'manual',
             fullDownload: options.fullDownload === true,
             skipGit: options.skipGit === true,
@@ -129,7 +143,7 @@ async function insertPending(siteId: number, options: EnqueueOptions): Promise<n
 }
 
 /**
- * Pending: marked `cancelled` right away. Running: the engine is asked to stop and stores the final status itself. Returns false when the backup is unknown or already finished.
+ * Pending: marked `cancelled` right away. Running: the engine is asked to stop and stores the final status itself. Returns false when the job is unknown or already finished.
  */
 export async function cancel(jobId: number): Promise<boolean> {
     const pending = await prisma.job.updateMany({
@@ -147,7 +161,7 @@ export async function cancel(jobId: number): Promise<boolean> {
 }
 
 /**
- * Registers listeners for one backup and returns the lines buffered so far, both in the same tick, so nothing emitted in between can be missed. The listeners are removed on `done`.
+ * Registers listeners for one job and returns the lines buffered so far, both in the same tick, so nothing emitted in between can be missed. The listeners are removed on `done`.
  */
 export function subscribe(jobId: number, listeners: JobListeners): Subscription {
     const onLog = (event: LogEvent) => {
@@ -188,6 +202,7 @@ async function fillSlots(): Promise<void> {
             select: {
                 id: true,
                 siteId: true,
+                kind: true,
                 triggerType: true,
                 fullDownload: true,
                 skipGit: true,
@@ -217,6 +232,14 @@ async function fillSlots(): Promise<void> {
     }
 }
 
+type JobUpdate = Parameters<typeof prisma.job.updateMany>[0]['data'];
+
+/** What an engine run leaves to store: the final columns of the row and, when one was read in full, the site's inventory. */
+interface Execution {
+    final: JobUpdate & { status: JobStatus; finishedAt: Date };
+    inventory: Inventory | null;
+}
+
 async function run(row: PendingRow, job: RunningJob): Promise<void> {
     const jobId = row.id;
     const onLog = (entry: LogEntry) => {
@@ -226,54 +249,35 @@ async function run(row: PendingRow, job: RunningJob): Promise<void> {
 
     let status: JobStatus;
     try {
-        let final: Parameters<typeof prisma.job.updateMany>[0]['data'];
+        let execution: Execution;
         try {
-            const [site, github, sharepoint] = await Promise.all([
-                getSiteConfig(row.siteId),
-                getGithubConfig(),
-                getSharePointConfig(),
-            ]);
+            const site = await getSiteConfig(row.siteId);
             if (!site) throw new Error('Site was deleted');
-            if (!github) throw new Error('GitHub token and email are not configured (Settings)');
-
-            const result = await runBackup(site, github, sharepoint, {
-                localRoot: path.join(filesDir(), site.repo),
-                triggerType: row.triggerType as TriggerType,
-                fullDownload: row.fullDownload,
-                skipGit: row.skipGit,
-                signal: job.abort.signal,
-                onLog,
-            });
-            status = result.status;
-            final = {
-                status,
-                finishedAt: result.finishedAt,
-                durationMs: result.durationMs,
-                filesDownloaded: result.filesDownloaded,
-                filesUnchanged: result.filesUnchanged,
-                filesDeleted: result.filesDeleted,
-                dumpSizeBytes: result.dumpSizeBytes,
-                commitSha: result.commitSha,
-                tag: result.tag,
-                releaseUrl: result.releaseUrl,
-                errorMessage: result.errorMessage,
-                log: result.log,
-            };
+            execution =
+                row.kind === 'inventory'
+                    ? await executeInventory(site, job, onLog)
+                    : await executeBackup(site, row, job, onLog);
         } catch (error) {
-            // Only reached when the configuration could not be loaded: the engine never throws.
+            // Only reached when the configuration could not be loaded: the engines never throw.
             const cancelled = job.abort.signal.aborted;
-            status = cancelled ? 'cancelled' : 'error';
             const message = cancelled ? 'Cancelled by user' : errorMessage(error);
             onLog({ time: new Date().toISOString(), level: 'error', msg: message });
-            final = {
-                status,
-                finishedAt: new Date(),
-                errorMessage: message,
-                log: formatLog(job.logLines),
+            execution = {
+                final: {
+                    status: cancelled ? 'cancelled' : 'error',
+                    finishedAt: new Date(),
+                    errorMessage: message,
+                    log: formatLog(job.logLines),
+                },
+                inventory: null,
             };
         }
+        status = execution.final.status;
         // updateMany rather than update: deleting the site cascades to the row while it runs.
-        await prisma.job.updateMany({ where: { id: jobId }, data: final });
+        await prisma.job.updateMany({ where: { id: jobId }, data: execution.final });
+        if (execution.inventory) {
+            await storeInventory(row.siteId, execution.inventory, execution.final.finishedAt);
+        }
     } catch (error) {
         status = 'error';
         console.error(`[queue] job ${jobId}: ${errorMessage(error)}`);
@@ -282,4 +286,68 @@ async function run(row: PendingRow, job: RunningJob): Promise<void> {
         state.running.delete(jobId);
     }
     state.events.emit('done', { jobId, status });
+}
+
+async function executeBackup(
+    site: SiteConfig,
+    row: PendingRow,
+    job: RunningJob,
+    onLog: (entry: LogEntry) => void,
+): Promise<Execution> {
+    const [github, sharepoint] = await Promise.all([getGithubConfig(), getSharePointConfig()]);
+    if (!github) throw new Error('GitHub token and email are not configured (Settings)');
+
+    const result = await runBackup(site, github, sharepoint, {
+        localRoot: path.join(filesDir(), site.repo),
+        triggerType: row.triggerType as TriggerType,
+        fullDownload: row.fullDownload,
+        skipGit: row.skipGit,
+        signal: job.abort.signal,
+        onLog,
+    });
+    return {
+        final: {
+            status: result.status,
+            finishedAt: result.finishedAt,
+            durationMs: result.durationMs,
+            filesDownloaded: result.filesDownloaded,
+            filesUnchanged: result.filesUnchanged,
+            filesDeleted: result.filesDeleted,
+            dumpSizeBytes: result.dumpSizeBytes,
+            commitSha: result.commitSha,
+            tag: result.tag,
+            releaseUrl: result.releaseUrl,
+            errorMessage: result.errorMessage,
+            log: result.log,
+        },
+        // Whatever the outcome: the inventory was read from files the sync had just completed, a push that fails afterwards does not make it wrong.
+        inventory: result.inventory,
+    };
+}
+
+async function executeInventory(
+    site: SiteConfig,
+    job: RunningJob,
+    onLog: (entry: LogEntry) => void,
+): Promise<Execution> {
+    const result = await runInventory(site, { signal: job.abort.signal, onLog });
+    return {
+        final: {
+            status: result.status,
+            finishedAt: result.finishedAt,
+            durationMs: result.durationMs,
+            errorMessage: result.errorMessage,
+            log: result.log,
+        },
+        inventory: result.inventory,
+    };
+}
+
+/** The job row already carries the outcome of the run: an inventory that cannot be stored (the site was deleted meanwhile) is logged, it does not turn the job into a failure. */
+async function storeInventory(siteId: number, inventory: Inventory, readAt: Date): Promise<void> {
+    try {
+        await saveInventory(siteId, inventory, readAt);
+    } catch (error) {
+        console.error(`[queue] site ${siteId}: inventory not stored: ${errorMessage(error)}`);
+    }
 }

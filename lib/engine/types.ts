@@ -3,6 +3,8 @@
  * only ever sees these decrypted, validated objects, never Prisma models.
  */
 
+import type { Inventory } from './inventory/types';
+
 export type Protocol = 'ftp' | 'sftp';
 
 export interface SiteConfig {
@@ -16,6 +18,8 @@ export interface SiteConfig {
     password: string;
     webRootPath: string;
     spListItemId: string | null;
+    /** Read the CMS and component versions from the synced files at each backup. */
+    inventoryEnabled: boolean;
 }
 
 /** What a remote client needs: the connection test runs on these fields before a site exists. */
@@ -102,6 +106,8 @@ export interface BackupResult {
     commitSha: string | null;
     tag: string | null;
     releaseUrl: string | null;
+    /** What the synced files say runs on the site. Null when the site has the inventory off, when the run stopped before the sync was over, or when the reading failed (a warning in the log). */
+    inventory: Inventory | null;
     errorMessage: string | null;
     /** Full text log of the run. */
     log: string;

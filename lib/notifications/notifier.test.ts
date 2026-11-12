@@ -28,7 +28,7 @@ const SMTP = {
     smtpFrom: 'reposite@example.com',
 };
 
-async function createBackup(status: string): Promise<number> {
+async function createJob(status: string, kind = 'backup'): Promise<number> {
     const site = await prisma.site.upsert({
         where: { domain: 'site.test' },
         update: {},
@@ -45,6 +45,7 @@ async function createBackup(status: string): Promise<number> {
     const backup = await prisma.job.create({
         data: {
             siteId: site.id,
+            kind,
             status,
             triggerType: 'scheduled',
             startedAt: new Date(),
@@ -67,10 +68,10 @@ beforeEach(async () => {
 
 afterAll(cleanup);
 
-describe('notifyBackupFailed', () => {
+describe('notifyJobFailed, backup', () => {
     it('sends the failure mail with the decrypted SMTP configuration', async () => {
-        const id = await createBackup('error');
-        expect(await notifier.notifyBackupFailed(id)).toBe(true);
+        const id = await createJob('error');
+        expect(await notifier.notifyJobFailed(id)).toBe(true);
 
         expect(sent).toHaveLength(1);
         const { config, mail } = sent[0]!;
@@ -90,23 +91,82 @@ describe('notifyBackupFailed', () => {
 
     it('sends nothing while the switch is off', async () => {
         await prisma.settings.update({ where: { id: 1 }, data: { notifyOnError: false } });
-        const id = await createBackup('error');
-        expect(await notifier.notifyBackupFailed(id)).toBe(false);
+        const id = await createJob('error');
+        expect(await notifier.notifyJobFailed(id)).toBe(false);
         expect(sent).toHaveLength(0);
     });
 
     it('sends nothing while the SMTP block is incomplete', async () => {
         await prisma.settings.update({ where: { id: 1 }, data: { notifyTo: null } });
-        const id = await createBackup('error');
-        expect(await notifier.notifyBackupFailed(id)).toBe(false);
+        const id = await createJob('error');
+        expect(await notifier.notifyJobFailed(id)).toBe(false);
         expect(sent).toHaveLength(0);
     });
 
     it('ignores a backup that did not fail or no longer exists', async () => {
-        const id = await createBackup('success');
-        expect(await notifier.notifyBackupFailed(id)).toBe(false);
-        expect(await notifier.notifyBackupFailed(id + 1000)).toBe(false);
+        const id = await createJob('success');
+        expect(await notifier.notifyJobFailed(id)).toBe(false);
+        expect(await notifier.notifyJobFailed(id + 1000)).toBe(false);
         expect(sent).toHaveLength(0);
+    });
+});
+
+describe('notifyJobFailed, inventory', () => {
+    beforeEach(async () => {
+        await prisma.settings.update({
+            where: { id: 1 },
+            data: { notifyOnError: false, notifyOnInventoryError: true },
+        });
+    });
+
+    it('mails a failed inventory under its own switch, with a link to the filtered history', async () => {
+        const id = await createJob('error', 'inventory');
+        expect(await notifier.notifyJobFailed(id)).toBe(true);
+
+        const { mail } = sent[0]!;
+        expect(mail.subject).toBe('[Reposite] Inventory failed: site.test');
+        expect(mail.text).toContain(`Inventory #${id} of site.test failed.`);
+        expect(mail.text).toContain('No other mail will follow');
+        expect(mail.text).toMatch(
+            /History: https:\/\/backups\.example\.com\/history\?siteId=\d+&kind=inventory/,
+        );
+    });
+
+    it('sends nothing while its switch is off, even with backup failures on', async () => {
+        await prisma.settings.update({
+            where: { id: 1 },
+            data: { notifyOnError: true, notifyOnInventoryError: false },
+        });
+        const id = await createJob('error', 'inventory');
+        expect(await notifier.notifyJobFailed(id)).toBe(false);
+        expect(sent).toHaveLength(0);
+    });
+
+    it('mails only the first failure of a series', async () => {
+        await createJob('success', 'inventory');
+        const first = await createJob('error', 'inventory');
+        const second = await createJob('error', 'inventory');
+
+        expect(await notifier.notifyJobFailed(first)).toBe(true);
+        expect(await notifier.notifyJobFailed(second)).toBe(false);
+        expect(sent).toHaveLength(1);
+    });
+
+    it('mails again once an inventory has succeeded in between', async () => {
+        await createJob('error', 'inventory');
+        await createJob('success', 'inventory');
+        const again = await createJob('error', 'inventory');
+
+        expect(await notifier.notifyJobFailed(again)).toBe(true);
+    });
+
+    it('looks past cancelled runs and past backups when judging the series', async () => {
+        await createJob('error', 'inventory');
+        await createJob('cancelled', 'inventory');
+        await createJob('success');
+        const next = await createJob('error', 'inventory');
+
+        expect(await notifier.notifyJobFailed(next)).toBe(false);
     });
 });
 
@@ -124,8 +184,8 @@ describe('start', () => {
     it('reacts to the done event of a failed backup, once even when called twice', async () => {
         notifier.start();
         notifier.start();
-        const failed = await createBackup('error');
-        const ok = await createBackup('success');
+        const failed = await createJob('error');
+        const ok = await createJob('success');
 
         queue.events.emit('done', { jobId: ok, status: 'success' });
         queue.events.emit('done', { jobId: failed, status: 'error' });

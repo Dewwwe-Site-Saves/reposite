@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { abortable, isCancellation } from '../engine/cancel';
+import type { Inventory, InventoryOptions, InventoryResult } from '../engine/inventory';
 import type { BackupOptions, BackupResult, LogEntry } from '../engine/types';
 import { setupTestDatabase } from '../testing/db';
 import type { DoneEvent, LogEvent, StatusEvent } from './queue';
@@ -13,6 +14,11 @@ const { engine } = vi.hoisted(() => ({
         gates: [] as (() => void)[],
         calls: [] as BackupOptions[],
         outcome: 'success' as BackupResult['status'],
+        /** What the next backup reports having read from the synced files. */
+        inventory: null as Inventory | null,
+        /** Outcome of the next inventory run: an inventory, or the error it fails with. */
+        inventoryRun: null as Inventory | Error | null,
+        inventoryRuns: 0,
     },
 }));
 
@@ -49,8 +55,28 @@ vi.mock('../engine/backup', () => ({
             commitSha: status === 'success' ? 'abc123' : null,
             tag: status === 'success' ? '20260904-120000' : null,
             releaseUrl: null,
+            inventory: engine.inventory,
             errorMessage: status === 'success' ? null : `fake ${status}`,
             log: 'fake log',
+        };
+    },
+}));
+
+vi.mock('../engine/inventory', () => ({
+    runInventory: async (_site: unknown, options: InventoryOptions): Promise<InventoryResult> => {
+        engine.inventoryRuns++;
+        const startedAt = new Date();
+        options.onLog?.({ time: startedAt.toISOString(), level: 'info', msg: 'fake inventory' });
+        const outcome = engine.inventoryRun;
+        const failed = outcome instanceof Error;
+        return {
+            status: failed ? 'error' : 'success',
+            startedAt,
+            finishedAt: new Date(),
+            durationMs: 5,
+            inventory: failed ? null : outcome,
+            errorMessage: failed ? outcome.message : null,
+            log: 'fake inventory log',
         };
     },
 }));
@@ -115,7 +141,11 @@ beforeEach(async () => {
     engine.gates = [];
     engine.calls = [];
     engine.outcome = 'success';
+    engine.inventory = null;
+    engine.inventoryRun = null;
+    engine.inventoryRuns = 0;
     await prisma.job.deleteMany();
+    await prisma.siteComponent.deleteMany();
     await getSettings();
     await prisma.settings.update({
         where: { id: 1 },
@@ -234,6 +264,119 @@ describe('worker', () => {
         expect(stored.status).toBe('error');
         expect(stored.errorMessage).toMatch(/GitHub token/);
         expect(stored.log).toMatch(/\[error\] GitHub token/);
+    });
+});
+
+describe('inventory', () => {
+    const inventory: Inventory = {
+        cms: 'wordpress',
+        version: '6.4.3',
+        components: [
+            { type: 'plugin', slug: 'forms', name: 'Forms', version: '2.1.0' },
+            { type: 'theme', slug: 'classic', name: 'Classic', version: null },
+        ],
+    };
+
+    async function stored(siteId: number) {
+        const site = await prisma.site.findUniqueOrThrow({
+            where: { id: siteId },
+            select: { cms: true, cmsVersion: true, inventoryAt: true },
+        });
+        const components = await prisma.siteComponent.findMany({
+            where: { siteId },
+            orderBy: { id: 'asc' },
+            select: { type: true, slug: true, name: true, version: true },
+        });
+        return { site, components };
+    }
+
+    it('runs an inventory job through its own engine and stores what it read', async () => {
+        engine.inventoryRun = inventory;
+        const id = await queue.enqueue(siteA, { kind: 'inventory', triggerType: 'scheduled' });
+        await waitDone(id);
+
+        expect(engine.inventoryRuns).toBe(1);
+        expect(engine.calls).toHaveLength(0);
+        const row = await prisma.job.findUniqueOrThrow({ where: { id } });
+        expect(row).toMatchObject({
+            kind: 'inventory',
+            status: 'success',
+            triggerType: 'scheduled',
+            durationMs: 5,
+            log: 'fake inventory log',
+            filesDownloaded: null,
+            commitSha: null,
+        });
+        const { site, components } = await stored(siteA);
+        expect(site).toMatchObject({ cms: 'wordpress', cmsVersion: '6.4.3' });
+        expect(site.inventoryAt).toEqual(row.finishedAt);
+        expect(components).toEqual(inventory.components);
+    });
+
+    it('needs no GitHub configuration', async () => {
+        await prisma.settings.update({ where: { id: 1 }, data: { githubTokenEnc: null } });
+        engine.inventoryRun = inventory;
+        const id = await queue.enqueue(siteA, { kind: 'inventory' });
+
+        expect((await waitDone(id)).status).toBe('success');
+    });
+
+    it('keeps the stored inventory when a run fails', async () => {
+        engine.inventoryRun = inventory;
+        await waitDone(await queue.enqueue(siteA, { kind: 'inventory' }));
+        const before = await stored(siteA);
+
+        engine.inventoryRun = new Error('Transfer failed');
+        const id = await queue.enqueue(siteA, { kind: 'inventory' });
+
+        expect((await waitDone(id)).status).toBe('error');
+        expect(await prisma.job.findUniqueOrThrow({ where: { id } })).toMatchObject({
+            status: 'error',
+            errorMessage: 'Transfer failed',
+        });
+        expect(await stored(siteA)).toEqual(before);
+    });
+
+    it('replaces the components as a whole at each complete inventory', async () => {
+        engine.inventoryRun = inventory;
+        await waitDone(await queue.enqueue(siteA, { kind: 'inventory' }));
+
+        engine.inventoryRun = {
+            ...inventory,
+            version: '6.5',
+            components: [{ type: 'plugin', slug: 'forms', name: 'Forms', version: '2.2.0' }],
+        };
+        await waitDone(await queue.enqueue(siteA, { kind: 'inventory' }));
+
+        const { site, components } = await stored(siteA);
+        expect(site.cmsVersion).toBe('6.5');
+        expect(components).toEqual([
+            { type: 'plugin', slug: 'forms', name: 'Forms', version: '2.2.0' },
+        ]);
+    });
+
+    it('stores the inventory a backup read from the synced files, whatever its outcome', async () => {
+        engine.inventory = inventory;
+        engine.outcome = 'error';
+        const id = await queue.enqueue(siteB);
+        await waitStarted(1);
+        releaseNext();
+
+        expect((await waitDone(id)).status).toBe('error');
+        const { site, components } = await stored(siteB);
+        expect(site.cmsVersion).toBe('6.4.3');
+        expect(components).toHaveLength(2);
+    });
+
+    it('refuses a second job on a site whatever the kinds', async () => {
+        const backup = await queue.enqueue(siteA);
+        await waitStarted(1);
+
+        await expect(queue.enqueue(siteA, { kind: 'inventory' })).rejects.toBeInstanceOf(
+            queue.JobConflictError,
+        );
+        releaseNext();
+        await waitDone(backup);
     });
 });
 

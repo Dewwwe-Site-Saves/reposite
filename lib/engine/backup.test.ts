@@ -89,6 +89,7 @@ beforeEach(() => {
         password: 'p',
         webRootPath: 'www',
         spListItemId: null,
+        inventoryEnabled: false,
     };
     entries = [];
     stubDumpEndpoint();
@@ -135,6 +136,57 @@ describe('runBackup', () => {
             '/www/wp-config.php',
             '/www/wp-content/uploads/a.jpg',
         ]);
+    });
+
+    it('reads the inventory from the synced files, without a request to the site', async () => {
+        site.inventoryEnabled = true;
+        remote.put('/www/wp-includes/version.php', "<?php\n$wp_version = '6.4.3';\n");
+        remote.put(
+            '/www/wp-content/plugins/forms/forms.php',
+            '<?php\n/* Plugin Name: Forms\nVersion: 2.1.0 */',
+        );
+
+        const result = await run();
+
+        expect(result.status).toBe('success');
+        expect(result.inventory).toEqual({
+            cms: 'wordpress',
+            version: '6.4.3',
+            components: [{ type: 'plugin', slug: 'forms', name: 'Forms', version: '2.1.0' }],
+        });
+        expect(remote.reads).toEqual([]);
+    });
+
+    it('reads no inventory for a site that has it switched off', async () => {
+        remote.put('/www/wp-includes/version.php', "<?php\n$wp_version = '6.4.3';\n");
+
+        const result = await run();
+
+        expect(result.inventory).toBeNull();
+        expect(result.log).not.toContain('Inventory');
+    });
+
+    it('still succeeds when the synced files hold no known CMS', async () => {
+        site.inventoryEnabled = true;
+
+        const result = await run();
+
+        expect(result.status).toBe('success');
+        expect(result.inventory).toBeNull();
+        expect(result.log).toContain('[warn] [site.test] Inventory failed: No supported CMS found');
+        expect(result.tag).not.toBeNull();
+    });
+
+    it('skips the inventory when the sync left a file behind', async () => {
+        site.inventoryEnabled = true;
+        remote.put('/www/wp-includes/version.php', "<?php\n$wp_version = '6.4.3';\n");
+        remote.undownloadable.add('/www/wp-content/uploads/a.jpg');
+
+        const result = await run();
+
+        expect(result.status).toBe('success');
+        expect(result.inventory).toBeNull();
+        expect(result.log).toContain('Inventory skipped: the sync was incomplete');
     });
 
     it('creates no snapshot when nothing changed', async () => {

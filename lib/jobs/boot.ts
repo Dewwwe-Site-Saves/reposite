@@ -4,15 +4,17 @@ import { getSettings } from '../db';
 import { errorMessage } from '../engine/cancel';
 import * as notifier from '../notifications/notifier';
 import { initDatabase, prisma } from '../prisma';
-import { ACTIVE_STATUSES } from '../validation';
+import { ACTIVE_STATUSES, JOB_KINDS, type JobKind } from '../constants';
 import * as scheduler from './scheduler';
 
 /**
  * Server start-up, called once from `instrumentation.ts`: environment checks, database pragmas, orphan job sweep, scheduler, daily retention. A second call in the same process (dev hot reload) skips the sweep, the queue is still alive and its rows are not orphans.
  */
 
-/** Backups to keep per site whatever their age. */
+/** Jobs of each kind to keep per site whatever their age. */
 export const RETENTION_KEEP_LAST = 5;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Runs at 04:00 in `TZ`, an hour after the default backup slot. */
 const RETENTION_CRON = '0 4 * * *';
@@ -72,11 +74,11 @@ export function checkEnvironment(): void {
     console.warn(`[boot] ${message}`);
 }
 
-/** Rows still `pending` or `running` at start-up belonged to the previous process: nothing will ever finish them. Returns the domain of each row swept, for the notification. */
+/** Rows still `pending` or `running` at start-up belonged to the previous process: nothing will ever finish them. Returns the domain of each backup swept, for the notification: an interrupted inventory is failed like the others but is not worth a mail, the next one replaces it. */
 export async function sweepInterruptedJobs(): Promise<string[]> {
     const rows = await prisma.job.findMany({
         where: { status: { in: [...ACTIVE_STATUSES] } },
-        select: { id: true, site: { select: { domain: true } } },
+        select: { id: true, kind: true, site: { select: { domain: true } } },
         orderBy: { id: 'asc' },
     });
     if (rows.length === 0) return [];
@@ -88,32 +90,38 @@ export async function sweepInterruptedJobs(): Promise<string[]> {
             errorMessage: 'Interrupted by server restart',
         },
     });
-    return rows.map((row) => row.site.domain);
+    return rows.filter((row) => row.kind === 'backup').map((row) => row.site.domain);
 }
 
-/** Deletes backups older than `Settings.retentionDays`, always keeping the last `RETENTION_KEEP_LAST` per site and never an active one. Returns the number of rows deleted. */
+/** Deletes the jobs older than their kind allows (`Settings.retentionDays` for backups, `Settings.inventoryRetentionDays` for inventories), always keeping the last `RETENTION_KEEP_LAST` of each kind per site and never an active one. Returns the number of rows deleted. */
 export async function pruneJobs(now = new Date()): Promise<number> {
-    const { retentionDays } = await getSettings();
-    const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+    const settings = await getSettings();
+    const retention: Record<JobKind, number> = {
+        backup: settings.retentionDays,
+        inventory: settings.inventoryRetentionDays,
+    };
     const sites = await prisma.site.findMany({ select: { id: true } });
 
     let deleted = 0;
     for (const site of sites) {
-        const kept = await prisma.job.findMany({
-            where: { siteId: site.id },
-            orderBy: { id: 'desc' },
-            take: RETENTION_KEEP_LAST,
-            select: { id: true },
-        });
-        const { count } = await prisma.job.deleteMany({
-            where: {
-                siteId: site.id,
-                id: { notIn: kept.map((b) => b.id) },
-                status: { notIn: [...ACTIVE_STATUSES] },
-                queuedAt: { lt: cutoff },
-            },
-        });
-        deleted += count;
+        for (const kind of JOB_KINDS) {
+            const kept = await prisma.job.findMany({
+                where: { siteId: site.id, kind },
+                orderBy: { id: 'desc' },
+                take: RETENTION_KEEP_LAST,
+                select: { id: true },
+            });
+            const { count } = await prisma.job.deleteMany({
+                where: {
+                    siteId: site.id,
+                    kind,
+                    id: { notIn: kept.map((job) => job.id) },
+                    status: { notIn: [...ACTIVE_STATUSES] },
+                    queuedAt: { lt: new Date(now.getTime() - retention[kind] * DAY_MS) },
+                },
+            });
+            deleted += count;
+        }
     }
     return deleted;
 }
@@ -121,7 +129,7 @@ export async function pruneJobs(now = new Date()): Promise<number> {
 async function runRetention(): Promise<void> {
     try {
         const deleted = await pruneJobs();
-        if (deleted > 0) console.log(`[retention] deleted ${deleted} old backup(s)`);
+        if (deleted > 0) console.log(`[retention] deleted ${deleted} old job(s)`);
     } catch (error) {
         console.error(`[retention] ${errorMessage(error)}`);
     }

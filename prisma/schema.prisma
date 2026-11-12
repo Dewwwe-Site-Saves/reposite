@@ -33,12 +33,34 @@ model Site {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   jobs         Job[]
+
+  // Inventory: what runs on the site, as last read from its files
+  cms                   String? // detected: wordpress
+  cmsVersion            String?
+  inventoryAt           DateTime? // last complete inventory, from a backup or an inventory run
+  inventoryEnabled      Boolean         @default(true)
+  inventoryCronSchedule String? // null = use Settings.defaultInventoryCron
+  components            SiteComponent[]
+}
+
+// One row per plugin or theme installed on a site. Current state only: replaced as a whole by every complete inventory.
+model SiteComponent {
+  id      Int     @id @default(autoincrement())
+  site    Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  siteId  Int
+  type    String // plugin | mu-plugin | theme
+  slug    String // directory name, or file name without extension
+  name    String
+  version String?
+
+  @@unique([siteId, type, slug])
 }
 
 model Job {
   id              Int       @id @default(autoincrement())
   site            Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
   siteId          Int
+  kind            String    @default("backup") // backup | inventory
   status          String    @default("pending") // pending | running | success | error | cancelled
   triggerType     String    @default("manual") // manual | scheduled
   fullDownload    Boolean   @default(false)
@@ -63,27 +85,30 @@ model Job {
 
 // Singleton row, id = 1
 model Settings {
-  id               Int      @id @default(1)
-  githubName       String? // commit author name, defaults to "Reposite" when empty
-  githubEmail      String? // commit author email
-  githubTokenEnc   String? // fine-grained PAT: Contents read/write, Metadata read
-  spTenantId       String?
-  spClientId       String?
-  spCertThumbprint String?
-  spTenantName     String?
-  spSiteName       String?
-  spListName       String?
-  spDateField      String?
-  defaultCron      String   @default("0 2 1,15 * *") // 1st and 15th of the month at 02:00
-  concurrency      Int      @default(2)
-  retentionDays    Int      @default(90) // prune Job rows older than this
-  notifyOnError    Boolean  @default(false) // mail on every failed run (needs the SMTP block below)
-  notifyTo         String? // recipients, comma-separated
-  smtpHost         String?
-  smtpPort         Int      @default(587)
-  smtpSecurity     String   @default("starttls") // none | starttls | tls
-  smtpUser         String?
-  smtpPasswordEnc  String? // enc:v1:<iv>:<tag>:<ciphertext>
-  smtpFrom         String?
-  updatedAt        DateTime @updatedAt
+  id                     Int      @id @default(1)
+  githubName             String? // commit author name, defaults to "Reposite" when empty
+  githubEmail            String? // commit author email
+  githubTokenEnc         String? // fine-grained PAT: Contents read/write, Metadata read
+  spTenantId             String?
+  spClientId             String?
+  spCertThumbprint       String?
+  spTenantName           String?
+  spSiteName             String?
+  spListName             String?
+  spDateField            String?
+  defaultCron            String   @default("0 2 1,15 * *") // 1st and 15th of the month at 02:00
+  concurrency            Int      @default(2)
+  retentionDays          Int      @default(90) // prune backup Job rows older than this
+  defaultInventoryCron   String   @default("0 4 * * *") // every day at 04:00
+  inventoryRetentionDays Int      @default(14) // prune inventory Job rows older than this
+  notifyOnError          Boolean  @default(false) // mail on every failed backup (needs the SMTP block below)
+  notifyOnInventoryError Boolean  @default(false) // mail when an inventory run starts failing (same SMTP block)
+  notifyTo               String? // recipients, comma-separated
+  smtpHost               String?
+  smtpPort               Int      @default(587)
+  smtpSecurity           String   @default("starttls") // none | starttls | tls
+  smtpUser               String?
+  smtpPasswordEnc        String? // enc:v1:<iv>:<tag>:<ciphertext>
+  smtpFrom               String?
+  updatedAt              DateTime @updatedAt
 }

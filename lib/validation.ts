@@ -12,7 +12,7 @@ export {
     TRIGGER_TYPES,
     isActive,
 } from './constants';
-export type { ActiveStatus, JobStatus, SmtpSecurity, TriggerType } from './constants';
+export type { ActiveStatus, JobKind, JobStatus, SmtpSecurity, TriggerType } from './constants';
 
 // ============ Field schemas ============
 
