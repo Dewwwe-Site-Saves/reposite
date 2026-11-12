@@ -6,14 +6,12 @@ v2 is in production since 2026-09-06. This file tracks what is left to verify on
 
 Everything below is code that exists and is covered by tests, but has not yet been exercised end to end on the deployed instance.
 
-- [ ] One backup per remaining site (each site once, so that protocol, web root and dump path are confirmed for all of them; the first site passed on 2026-09-06)
-- [ ] A scheduled run firing on its own at the configured time
+- [ ] One backup for the last remaining site: every other site has succeeded at least once (history of 2026-11-01). This one sits on a host where `exec()` is disabled, so the dump helper answers `exec_disabled` and the run stops before the file sync; it passes once the PHP dump fallback below exists
 - [ ] A run with nothing changed on the remote: no commit, no tag, no Release, status `success`
 - [ ] Login throttle: 429 with `Retry-After` after five failed attempts from the same address
 - [ ] A backup cancelled from the UI while a download is in progress leaves the clone consistent (next run recovers)
 - [ ] A container restart during a run: the next scheduled run goes through after the sweep (the sweep itself passed locally on 2026-09-06: the backup was marked `error` "Interrupted by server restart" and the "interrupted" mail arrived)
 - [ ] Notifications, test mail: "Send test mail" shows the server's response line and the message reaches every recipient (delivery confirmed locally on 2026-09-06, the first missing mails were an SMTP misconfiguration on the sending side, not the app)
-- [ ] Notifications, failure mail: a real failed run (wrong FTP password on a test site) produces the mail with the error, the log tail and the history link (`APP_URL` set in the stack environment)
 - [ ] Notifications, partial refusal: a bogus recipient next to a valid one shows as refused in the test result and as a warning in the container log
 - [ ] Notifications, switch: saving with "Errors" on and an incomplete SMTP block is refused with the field named; with the switch off nothing is sent on a failed run
 - [ ] Notifications, password manager: typing the SMTP password and sending a test mail no longer triggers the "save password" prompt (opt-out attributes for 1Password, LastPass, Bitwarden, Dashlane; Chrome's built-in manager has no opt-out)
@@ -22,6 +20,7 @@ Everything below is code that exists and is covered by tests, but has not yet be
 
 Features with a rough design, in the order they are likely to be built.
 
+- [ ] **Database dump without `exec()`**. `helpers/backup-wp.php` shells out to `mysqldump` and gives up with `exec_disabled` on hosts that disable `exec()`, which leaves such a site with no backup at all since the dump failure ends the run. Fallback in the helper itself: a dump written through `mysqli` (`SHOW CREATE TABLE`, rows read unbuffered and written as batched `INSERT`s), used when `exec()` is missing or `mysqldump` is not found, with a header the validation in `lib/engine/dump.ts` accepts and the method named in the run log.
 - [ ] **Hack detection**. PHP in `wp-content/uploads`, suspicious patterns, core checksum verification via `api.wordpress.org`. Adds `hackAlert` / `hackDetails` columns by migration. Alerts go out through the notification mails, as a second switch next to "Errors".
 - [ ] **Multi-user and audit log**. Two halves of one feature: identity per person, then a trace of who did what. Identity comes from the SSO gateway in front of the app (Authelia forward-auth headers `Remote-User` / `Remote-Email` / `Remote-Groups`): the user row is created on first visit, the role derived from the group, the mode enabled explicitly by an env var and the headers trusted only behind a shared secret set by the reverse proxy, since the container port is reachable from the LAN. No OIDC client, no new dependency. The audit log is an `AuditEvent` table written from every mutating handler and from the queue (who queued or cancelled a backup), with a page in Settings. `viewer` role enforced through `requireRole`.
 - [ ] **Size report before the push**. The ten largest files of the run's delta in the log, and a warning for any file over 100 MB since GitHub refuses it (a 211 MB UpdraftPlus archive took a whole push down with an HTTP 408 on 2026-09-15, before the default exclusions existed). Makes the exclusion list self-correcting: what should not be there shows up in the report.
