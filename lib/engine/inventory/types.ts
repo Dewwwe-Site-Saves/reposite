@@ -26,16 +26,15 @@ export interface Inventory {
 export interface InventoryEntry {
     name: string;
     type: 'file' | 'dir';
-    size: number;
 }
 
 /**
- * What an adapter sees of the site: listings and file contents, with paths relative to the web root (`''` is the web root itself, `wp-content/plugins` a directory under it). Any remote error is thrown as is and ends the run: an inventory is complete or it is not stored, since whoever consumes it treats a missing component as an uninstalled one.
+ * What an adapter sees of a site, live over a connection or in the local copy a backup keeps: listings and file contents, with paths relative to the web root (`''` is the web root itself, `wp-content/plugins` a directory under it). Any error is thrown as is and ends the reading: an inventory is complete or it is not stored, since whoever consumes it treats a missing component as an uninstalled one.
  */
 export interface InventoryReader {
     /** Entries of a directory. A directory is listed once per run, later calls are served from memory. */
     list(dir: string): Promise<InventoryEntry[]>;
-    /** Content of a file as text. Empty, with a warning in the log, when a listing showed the file to be larger than any header file should be. */
+    /** Content of a file as text. Empty, with a warning in the log, when the file is larger than any header file should be. */
     readText(file: string): Promise<string>;
 }
 
