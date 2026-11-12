@@ -1,5 +1,5 @@
-# Pinned on purpose: a moving tag such as node:24-alpine swaps the Alpine release underneath and breaks native modules. Bump it explicitly.
-ARG NODE_IMAGE=node:24.13.1-alpine3.23
+# Node major and Alpine release are pinned, the Node minor and patch float so that every build picks up the current security release. Never node:24-alpine: that tag swaps the Alpine release underneath and breaks native modules and Prisma's OpenSSL. Bump the Alpine release explicitly, and before the Docker Hub image stops being rebuilt for it (only the two latest Alpine releases are).
+ARG NODE_IMAGE=node:24-alpine3.23
 
 # ---- builder: one install, Prisma client, Next.js standalone build, then pruned to the runtime node_modules ----
 # A single stage on purpose: two independent stages would run their `npm ci` and the build in parallel and double the peak memory of the build.
