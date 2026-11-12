@@ -1,12 +1,12 @@
-# Reposite as a Portainer stack in Repository mode (compose path: docker-compose.yml, branch: main).
-# Everything host-specific comes from the stack's environment variables, never from this file:
+# Reposite as a Compose stack, used unchanged as the compose file of the Arcane project that runs it.
+# Everything host-specific comes from the project's .env, never from this file:
 #   ENCRYPTION_KEY, SESSION_SECRET  openssl rand -hex 32 each
 #   REPOSITE_DATA                   host directory mounted on /data (database, clones, certificate), writable by PUID:PGID
 #   REPOSITE_SUBNET                 a free /29 for the stack network
 #   REPOSITE_PORT, PUID, PGID, TZ   optional, see the defaults below
 #   REPOSITE_TAG                    image tag: unset for :latest (releases), a branch name to try a pre-release build
 #   APP_URL                         optional, public URL of the instance for the links in notification mails
-# Updates are manual: Stack > Editor > Pull and redeploy. The image only moves on version tags (see .github/workflows/docker-build-push.yml).
+# The :latest image only moves on version tags, and the same workflow then redeploys the project through a webhook (see .github/workflows/docker-build-push.yml). Without that webhook, pull and redeploy by hand.
 
 services:
     reposite:

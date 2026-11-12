@@ -65,3 +65,22 @@ jobs:
                   labels: ${{ steps.meta.outputs.labels }}
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
+
+            # Version tags only: the host moves when a release is tagged, never on a push to main.
+            # The URL is an Arcane webhook of type "redeploy" (an "update" one does nothing here), reachable from GitHub. Without the secret the step does nothing.
+            - name: Redeploy the stack
+              if: startsWith(github.ref, 'refs/tags/v')
+              env:
+                  ARCANE_WEBHOOK_URL: ${{ secrets.ARCANE_WEBHOOK_URL }}
+              run: |
+                  if [ -z "$ARCANE_WEBHOOK_URL" ]; then
+                      echo "ARCANE_WEBHOOK_URL is not set: nothing to redeploy"
+                      exit 0
+                  fi
+                  # The URL carries its own token: only the status reaches the log.
+                  status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 60 --request POST "$ARCANE_WEBHOOK_URL")
+                  echo "Webhook answered HTTP $status"
+                  case "$status" in
+                      2*) ;;
+                      *) exit 1 ;;
+                  esac

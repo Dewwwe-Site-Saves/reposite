@@ -149,7 +149,7 @@ npx tsx scripts/smoke-inventory.ts your-site.com   # CMS, plugins, themes and ve
 
 ## Deploy (Docker)
 
-The image is built by GitHub Actions and published on GHCR as `ghcr.io/dewwwe-site-saves/reposite`: `staging` on every push to `main`, `latest` and `X.Y.Z` on version tags, `<branch>` when the workflow is run by hand. It runs as a Portainer stack from [docker-compose.yml](./docker-compose.yml): Stacks, Add stack, Repository, compose path `docker-compose.yml`, branch `main`. The stack's environment variables carry everything host-specific:
+The image is built by GitHub Actions and published on GHCR as `ghcr.io/dewwwe-site-saves/reposite`: `staging` on every push to `main`, `latest` and `X.Y.Z` on version tags, `<branch>` when the workflow is run by hand. It runs as an Arcane project whose compose file is [docker-compose.yml](./docker-compose.yml), unchanged; any Compose-based manager works the same way. The project's `.env` carries everything host-specific:
 
 - `ENCRYPTION_KEY`, `SESSION_SECRET` — `openssl rand -hex 32` each
 - `REPOSITE_DATA` — host directory mounted on `/data`
@@ -157,7 +157,7 @@ The image is built by GitHub Actions and published on GHCR as `ghcr.io/dewwwe-si
 - `REPOSITE_PORT` — host port (default `3000`), `PUID` / `PGID` (default `1000`), `TZ`, `REPOSITE_TAG` (default `latest`)
 - `APP_URL` — public URL of the instance, optional, for the links in notification mails
 
-The container runs as `PUID:PGID`: the entrypoint makes the data directory theirs, applies the migrations and starts the server. Health is reported on `/api/health`. Updates are manual: Stack, Editor, Pull and redeploy. Put the app behind an HTTPS reverse proxy (an SSO gateway in front of it works, the app keeps its own login).
+The container runs as `PUID:PGID`: the entrypoint makes the data directory theirs, applies the migrations and starts the server. Health is reported on `/api/health`. Updates follow the releases: when the repository has an `ARCANE_WEBHOOK_URL` secret (an Arcane webhook of type "redeploy", reachable from GitHub), the workflow calls it once the image of a version tag is pushed, and the project is pulled and redeployed. A push to `main` never touches the host. Without the secret, pull and redeploy from Arcane by hand. Put the app behind an HTTPS reverse proxy (an SSO gateway in front of it works, the app keeps its own login).
 
 First run: open the app, create the admin on `/setup`, fill in Settings (commit author, GitHub token, SharePoint). To import the sites of a legacy `config.json`, copy it into the data volume, run the import in the container as the app user, then delete it (it holds cleartext passwords):
 

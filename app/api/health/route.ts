@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
-/** Unauthenticated probe for the Docker HEALTHCHECK and Portainer: 200 when the database answers, 503 otherwise. Public in `proxy.ts`. */
+/** Unauthenticated probe for the Docker HEALTHCHECK and the stack manager: 200 when the database answers, 503 otherwise. Public in `proxy.ts`. */
 export async function GET(): Promise<NextResponse> {
     try {
         await prisma.$queryRawUnsafe('SELECT 1');
