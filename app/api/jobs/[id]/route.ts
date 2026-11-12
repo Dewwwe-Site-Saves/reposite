@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { apiHandler, jsonError } from '@/lib/api';
-import { getBackup } from '@/lib/db';
+import { getJob } from '@/lib/db';
 import { parseId } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
@@ -9,10 +9,10 @@ export const dynamic = 'force-dynamic';
 export const GET = apiHandler(
     async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
         const id = parseId((await params).id);
-        const backup = id ? await getBackup(id) : null;
-        if (!backup) return jsonError(404, 'Backup not found');
+        const job = id ? await getJob(id) : null;
+        if (!job) return jsonError(404, 'Backup not found');
 
-        const { site, log, ...row } = backup;
+        const { site, log, ...row } = job;
         return NextResponse.json({ ...row, domain: site.domain, log: log ?? '' });
     },
 );

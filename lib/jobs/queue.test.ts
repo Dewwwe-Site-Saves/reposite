@@ -57,7 +57,7 @@ vi.mock('../engine/backup', () => ({
 
 const { prisma, dataDir, cleanup } = await setupTestDatabase();
 const { encrypt } = await import('../crypto');
-const { getSettings, listActiveBackups } = await import('../db');
+const { getSettings, listActiveJobs } = await import('../db');
 const queue = await import('./queue');
 
 let siteA: number;
@@ -82,10 +82,10 @@ function releaseNext(): void {
     engine.gates.shift()!();
 }
 
-function waitDone(backupId: number): Promise<DoneEvent> {
+function waitDone(jobId: number): Promise<DoneEvent> {
     return new Promise((resolve) => {
         const listener = (event: DoneEvent) => {
-            if (event.backupId !== backupId) return;
+            if (event.jobId !== jobId) return;
             queue.events.off('done', listener);
             resolve(event);
         };
@@ -94,8 +94,8 @@ function waitDone(backupId: number): Promise<DoneEvent> {
 }
 
 /** Lines buffered for a backup right now, through a throwaway subscription. */
-function buffered(backupId: number): readonly LogEntry[] {
-    const subscription = queue.subscribe(backupId, { onDone: () => {} });
+function buffered(jobId: number): readonly LogEntry[] {
+    const subscription = queue.subscribe(jobId, { onDone: () => {} });
     subscription.unsubscribe();
     return subscription.lines;
 }
@@ -115,7 +115,7 @@ beforeEach(async () => {
     engine.gates = [];
     engine.calls = [];
     engine.outcome = 'success';
-    await prisma.backup.deleteMany();
+    await prisma.job.deleteMany();
     await getSettings();
     await prisma.settings.update({
         where: { id: 1 },
@@ -126,11 +126,11 @@ beforeEach(async () => {
 describe('enqueue', () => {
     it('creates the pending row and rejects a second active backup for the same site', async () => {
         const id = await queue.enqueue(siteA, { fullDownload: true });
-        const row = await prisma.backup.findUniqueOrThrow({ where: { id } });
+        const row = await prisma.job.findUniqueOrThrow({ where: { id } });
         expect(row).toMatchObject({ siteId: siteA, fullDownload: true, skipGit: false });
 
         await waitStarted(1);
-        await expect(queue.enqueue(siteA)).rejects.toBeInstanceOf(queue.BackupConflictError);
+        await expect(queue.enqueue(siteA)).rejects.toBeInstanceOf(queue.JobConflictError);
         const other = await queue.enqueue(siteB);
         expect(other).toBeGreaterThan(id);
 
@@ -154,7 +154,7 @@ describe('worker', () => {
         const id = await queue.enqueue(siteA, { skipGit: true, triggerType: 'scheduled' });
         await waitStarted(1);
 
-        const running = await prisma.backup.findUniqueOrThrow({ where: { id } });
+        const running = await prisma.job.findUniqueOrThrow({ where: { id } });
         expect(running.status).toBe('running');
         expect(running.startedAt).not.toBeNull();
         expect(engine.calls[0]).toMatchObject({
@@ -164,7 +164,7 @@ describe('worker', () => {
         });
         expect(engine.calls[0].localRoot).toBe(path.join(dataDir, 'files', 'a-example-com'));
         expect(buffered(id)).toEqual([expect.objectContaining({ msg: 'fake run' })]);
-        expect(await listActiveBackups()).toEqual([
+        expect(await listActiveJobs()).toEqual([
             { id, siteId: siteA, domain: 'a.example.com', status: 'running' },
         ]);
 
@@ -173,11 +173,9 @@ describe('worker', () => {
         queue.events.off('log', onLog);
 
         expect(done.status).toBe('success');
-        expect(logs).toEqual([
-            { backupId: id, entry: expect.objectContaining({ msg: 'fake run' }) },
-        ]);
+        expect(logs).toEqual([{ jobId: id, entry: expect.objectContaining({ msg: 'fake run' }) }]);
         expect(buffered(id)).toEqual([]);
-        const stored = await prisma.backup.findUniqueOrThrow({ where: { id } });
+        const stored = await prisma.job.findUniqueOrThrow({ where: { id } });
         expect(stored).toMatchObject({
             status: 'success',
             filesDownloaded: 3,
@@ -190,7 +188,7 @@ describe('worker', () => {
             log: 'fake log',
         });
         expect(stored.finishedAt).not.toBeNull();
-        expect(await listActiveBackups()).toEqual([]);
+        expect(await listActiveJobs()).toEqual([]);
     });
 
     it('copies an error outcome as-is', async () => {
@@ -199,7 +197,7 @@ describe('worker', () => {
         await waitStarted(1);
         releaseNext();
         expect((await waitDone(id)).status).toBe('error');
-        const stored = await prisma.backup.findUniqueOrThrow({ where: { id } });
+        const stored = await prisma.job.findUniqueOrThrow({ where: { id } });
         expect(stored).toMatchObject({ status: 'error', errorMessage: 'fake error' });
     });
 
@@ -209,8 +207,7 @@ describe('worker', () => {
         const second = await queue.enqueue(siteB);
         await waitStarted(1);
 
-        const statuses = async () =>
-            (await listActiveBackups()).map((b) => [b.id, b.status] as const);
+        const statuses = async () => (await listActiveJobs()).map((b) => [b.id, b.status] as const);
         expect(await statuses()).toEqual([
             [first, 'running'],
             [second, 'pending'],
@@ -233,7 +230,7 @@ describe('worker', () => {
         expect(done.status).toBe('error');
         expect(engine.calls).toHaveLength(0);
 
-        const stored = await prisma.backup.findUniqueOrThrow({ where: { id } });
+        const stored = await prisma.job.findUniqueOrThrow({ where: { id } });
         expect(stored.status).toBe('error');
         expect(stored.errorMessage).toMatch(/GitHub token/);
         expect(stored.log).toMatch(/\[error\] GitHub token/);
@@ -250,7 +247,7 @@ describe('cancel', () => {
         const done = waitDone(second);
         expect(await queue.cancel(second)).toBe(true);
         expect((await done).status).toBe('cancelled');
-        const stored = await prisma.backup.findUniqueOrThrow({ where: { id: second } });
+        const stored = await prisma.job.findUniqueOrThrow({ where: { id: second } });
         expect(stored).toMatchObject({ status: 'cancelled', errorMessage: 'Cancelled by user' });
         expect(stored.finishedAt).not.toBeNull();
 
@@ -267,7 +264,7 @@ describe('cancel', () => {
         expect(await queue.cancel(id)).toBe(true);
         expect(engine.calls[0].signal?.aborted).toBe(true);
         expect((await waitDone(id)).status).toBe('cancelled');
-        const stored = await prisma.backup.findUniqueOrThrow({ where: { id } });
+        const stored = await prisma.job.findUniqueOrThrow({ where: { id } });
         expect(stored).toMatchObject({ status: 'cancelled', errorMessage: 'fake cancelled' });
     });
 
@@ -317,11 +314,9 @@ describe('subscribe', () => {
         await waitStarted(1);
         queue.events.off('status', onStatus);
 
-        expect(statuses).toEqual([
-            { backupId: id, status: 'running', startedAt: expect.any(String) },
-        ]);
+        expect(statuses).toEqual([{ jobId: id, status: 'running', startedAt: expect.any(String) }]);
         expect(Date.parse(statuses[0].startedAt)).toBeGreaterThanOrEqual(before);
-        const row = await prisma.backup.findUniqueOrThrow({ where: { id } });
+        const row = await prisma.job.findUniqueOrThrow({ where: { id } });
         expect(row.startedAt?.toISOString()).toBe(statuses[0].startedAt);
 
         releaseNext();

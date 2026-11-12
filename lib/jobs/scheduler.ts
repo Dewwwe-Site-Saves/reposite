@@ -1,7 +1,7 @@
 import { schedule, type ScheduledTask } from 'node-cron';
 import { getSettings, listSites } from '../db';
 import { errorMessage } from '../engine/cancel';
-import { BackupConflictError, enqueue } from './queue';
+import { JobConflictError, enqueue } from './queue';
 
 /**
  * One node-cron task per enabled site, firing `enqueue(siteId, { triggerType: 'scheduled' })`. The schedule is `site.cronSchedule`, or `Settings.defaultCron` when the site has none, in the `TZ` timezone. `reload()` rebuilds everything from the database and must be called after every site or settings mutation; the boot hook calls it once at startup.
@@ -71,7 +71,7 @@ async function trigger(siteId: number, domain: string): Promise<void> {
     try {
         await enqueue(siteId, { triggerType: 'scheduled' });
     } catch (error) {
-        if (error instanceof BackupConflictError) {
+        if (error instanceof JobConflictError) {
             console.warn(`[scheduler] ${domain}: skipped, a backup is already active`);
             return;
         }

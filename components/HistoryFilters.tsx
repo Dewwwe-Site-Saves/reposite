@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { BACKUP_STATUSES } from '@/lib/constants';
+import { JOB_STATUSES } from '@/lib/constants';
 
 const SELECT_CLASS =
     'h-7 rounded-md border border-input bg-input/20 px-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 dark:bg-input/30 md:text-xs/relaxed';
@@ -50,7 +50,7 @@ export function HistoryFilters({
                 onChange={(e) => apply({ status: e.target.value })}
             >
                 <option value="">All statuses</option>
-                {BACKUP_STATUSES.map((value) => (
+                {JOB_STATUSES.map((value) => (
                     <option key={value} value={value}>
                         {value.charAt(0).toUpperCase() + value.slice(1)}
                     </option>

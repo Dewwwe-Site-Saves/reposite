@@ -32,11 +32,11 @@ vi.mock('../db', () => ({
 
 vi.mock('./queue', () => ({
     enqueue: queue.enqueue,
-    BackupConflictError: class BackupConflictError extends Error {},
+    JobConflictError: class JobConflictError extends Error {},
 }));
 
 const scheduler = await import('./scheduler');
-const { BackupConflictError } = await import('./queue');
+const { JobConflictError } = await import('./queue');
 
 function site(id: number, overrides: Partial<SiteSummary> = {}): SiteSummary {
     return {
@@ -147,7 +147,7 @@ describe('task', () => {
 
     it('skips the run when the site already has an active backup', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        queue.enqueue.mockRejectedValue(new BackupConflictError(7));
+        queue.enqueue.mockRejectedValue(new JobConflictError(7));
         db.sites = [site(7)];
         await scheduler.reload();
         await expect(cron.tasks[0].fn()).resolves.toBeUndefined();

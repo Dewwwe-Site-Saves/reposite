@@ -1,5 +1,5 @@
 import { apiHandler, jsonError } from '@/lib/api';
-import { getBackup } from '@/lib/db';
+import { getJob } from '@/lib/db';
 import { parseLog } from '@/lib/engine/logger';
 import { subscribe } from '@/lib/jobs/queue';
 import { isActive, parseId } from '@/lib/validation';
@@ -14,11 +14,11 @@ const HEARTBEAT_MS = 25_000;
 export const GET = apiHandler(
     async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
         const id = parseId((await params).id);
-        const backup = id ? await getBackup(id) : null;
-        if (!backup) return jsonError(404, 'Backup not found');
+        const job = id ? await getJob(id) : null;
+        if (!job) return jsonError(404, 'Backup not found');
 
-        const backupId = backup.id;
-        const domain = backup.site.domain;
+        const jobId = job.id;
+        const domain = job.site.domain;
         const encoder = new TextEncoder();
 
         const stream = new ReadableStream({
@@ -49,7 +49,7 @@ export const GET = apiHandler(
                 };
 
                 // Listeners and buffer come from the same tick: nothing emitted in between can be missed.
-                const subscription = subscribe(backupId, {
+                const subscription = subscribe(jobId, {
                     onLog: (entry) => send({ type: 'log', ...entry }),
                     onStatus: (event) =>
                         send({
@@ -64,18 +64,18 @@ export const GET = apiHandler(
 
                 send({
                     type: 'status',
-                    status: backup.status,
+                    status: job.status,
                     domain,
-                    queuedAt: backup.queuedAt,
-                    startedAt: backup.startedAt,
-                    triggerType: backup.triggerType,
-                    fullDownload: backup.fullDownload,
-                    skipGit: backup.skipGit,
+                    queuedAt: job.queuedAt,
+                    startedAt: job.startedAt,
+                    triggerType: job.triggerType,
+                    fullDownload: job.fullDownload,
+                    skipGit: job.skipGit,
                 });
                 for (const entry of subscription.lines) send({ type: 'log', ...entry });
 
                 // The row read before the subscription may be stale. Every final status is written before `done` is emitted, so a fresh read settles it either way.
-                const fresh = isActive(backup.status) ? await getBackup(backupId) : backup;
+                const fresh = isActive(job.status) ? await getJob(jobId) : job;
                 if (closed) return;
                 if (!fresh) {
                     // The site was deleted while the backup ran; the row went with it.

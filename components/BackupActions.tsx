@@ -43,7 +43,7 @@ export function RunAllButton() {
         setSubmitting(true);
         setError(null);
         try {
-            const res = await fetch('/api/backups', {
+            const res = await fetch('/api/jobs', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: '{}',

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { Prisma } from './generated/prisma/client';
-import type { Backup, Settings, Site, User } from './generated/prisma/client';
+import type { Job, Settings, Site, User } from './generated/prisma/client';
 import type { Role } from './auth';
 import { decrypt, encrypt } from './crypto';
 import { DEFAULT_AUTHOR_NAME } from './engine/git';
@@ -11,7 +11,7 @@ import { prisma } from './prisma';
 import { ACTIVE_STATUSES, SECRET_MASK } from './validation';
 import type {
     ActiveStatus,
-    BackupsQuery,
+    JobsQuery,
     SettingsInput,
     SiteCreateInput,
     SiteUpdateInput,
@@ -123,17 +123,17 @@ export async function deleteSite(id: number): Promise<void> {
     await prisma.site.delete({ where: { id } });
 }
 
-export type SiteWithLastBackup = SiteSummary & { lastBackup: BackupRow | null };
+export type SiteWithLastBackup = SiteSummary & { lastBackup: JobRow | null };
 
 export async function listSitesWithLastBackup(): Promise<SiteWithLastBackup[]> {
     const sites = await prisma.site.findMany({
         select: {
             ...siteSelect,
-            backups: { orderBy: { queuedAt: 'desc' }, take: 1, omit: { log: true } },
+            jobs: { orderBy: { queuedAt: 'desc' }, take: 1, omit: { log: true } },
         },
         orderBy: { domain: 'asc' },
     });
-    return sites.map(({ backups, ...site }) => ({ ...site, lastBackup: backups[0] ?? null }));
+    return sites.map(({ jobs, ...site }) => ({ ...site, lastBackup: jobs[0] ?? null }));
 }
 
 /** True when a Prisma error is a unique constraint violation (duplicate domain or repo). */
@@ -141,29 +141,29 @@ export function isUniqueViolation(error: unknown): boolean {
     return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
 
-// ============ Backups ============
+// ============ Jobs ============
 
-/** A Backup without its log: lists never carry the log text, only the detail does. */
-export type BackupRow = Omit<Backup, 'log'>;
+/** A Job without its log: lists never carry the log text, only the detail does. */
+export type JobRow = Omit<Job, 'log'>;
 
-export type BackupWithDomain = BackupRow & { site: { domain: string } };
+export type JobWithDomain = JobRow & { site: { domain: string } };
 
-export type BackupDetail = Backup & { site: { domain: string } };
+export type JobDetail = Job & { site: { domain: string } };
 
-export interface BackupPage {
-    items: BackupWithDomain[];
+export interface JobPage {
+    items: JobWithDomain[];
     total: number;
     page: number;
     pageSize: number;
 }
 
-export async function listBackups(query: BackupsQuery): Promise<BackupPage> {
-    const where: Prisma.BackupWhereInput = {
+export async function listJobs(query: JobsQuery): Promise<JobPage> {
+    const where: Prisma.JobWhereInput = {
         ...(query.siteId ? { siteId: query.siteId } : {}),
         ...(query.status ? { status: query.status } : {}),
     };
     const [items, total] = await prisma.$transaction([
-        prisma.backup.findMany({
+        prisma.job.findMany({
             where,
             omit: { log: true },
             include: { site: { select: { domain: true } } },
@@ -171,28 +171,28 @@ export async function listBackups(query: BackupsQuery): Promise<BackupPage> {
             skip: (query.page - 1) * query.pageSize,
             take: query.pageSize,
         }),
-        prisma.backup.count({ where }),
+        prisma.job.count({ where }),
     ]);
     return { items, total, page: query.page, pageSize: query.pageSize };
 }
 
-export function getBackup(id: number): Promise<BackupDetail | null> {
-    return prisma.backup.findUnique({
+export function getJob(id: number): Promise<JobDetail | null> {
+    return prisma.job.findUnique({
         where: { id },
         include: { site: { select: { domain: true } } },
     });
 }
 
-export interface ActiveBackup {
+export interface ActiveJob {
     id: number;
     siteId: number;
     domain: string;
     status: ActiveStatus;
 }
 
-/** Backups still in the queue or executing, oldest first. The queue state is the database. */
-export async function listActiveBackups(): Promise<ActiveBackup[]> {
-    const rows = await prisma.backup.findMany({
+/** Jobs still in the queue or executing, oldest first. The queue state is the database. */
+export async function listActiveJobs(): Promise<ActiveJob[]> {
+    const rows = await prisma.job.findMany({
         where: { status: { in: [...ACTIVE_STATUSES] } },
         select: { id: true, siteId: true, status: true, site: { select: { domain: true } } },
         orderBy: { id: 'asc' },

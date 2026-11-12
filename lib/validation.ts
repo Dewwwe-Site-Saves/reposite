@@ -1,18 +1,18 @@
 import { z } from 'zod';
 import { validate as validateCron } from 'node-cron';
-import { BACKUP_STATUSES, PROTOCOLS, SECRET_MASK, SMTP_SECURITIES } from './constants';
+import { JOB_STATUSES, PROTOCOLS, SECRET_MASK, SMTP_SECURITIES } from './constants';
 
 // The constants live in `constants.ts` (browser-safe); re-exported so server code keeps one import.
 export {
     ACTIVE_STATUSES,
-    BACKUP_STATUSES,
+    JOB_STATUSES,
     PROTOCOLS,
     SECRET_MASK,
     SMTP_SECURITIES,
     TRIGGER_TYPES,
     isActive,
 } from './constants';
-export type { ActiveStatus, BackupStatus, SmtpSecurity, TriggerType } from './constants';
+export type { ActiveStatus, JobStatus, SmtpSecurity, TriggerType } from './constants';
 
 // ============ Field schemas ============
 
@@ -202,14 +202,14 @@ export const runBackupSchema = z.object({
 
 export type RunBackupInput = z.infer<typeof runBackupSchema>;
 
-export const backupsQuerySchema = z.object({
+export const jobsQuerySchema = z.object({
     siteId: z.coerce.number().int().positive().optional(),
-    status: z.enum(BACKUP_STATUSES).optional(),
+    status: z.enum(JOB_STATUSES).optional(),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-export type BackupsQuery = z.infer<typeof backupsQuerySchema>;
+export type JobsQuery = z.infer<typeof jobsQuerySchema>;
 
 // ============ Auth ============
 

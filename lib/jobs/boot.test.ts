@@ -26,14 +26,14 @@ async function createSite(domain: string): Promise<number> {
 
 /** One row per status, queued `ageDays` ago. */
 async function createBackup(siteId: number, status: string, ageDays: number): Promise<number> {
-    const backup = await prisma.backup.create({
+    const backup = await prisma.job.create({
         data: { siteId, status, queuedAt: new Date(now.getTime() - ageDays * DAY) },
     });
     return backup.id;
 }
 
 async function ids(siteId?: number): Promise<number[]> {
-    const rows = await prisma.backup.findMany({
+    const rows = await prisma.job.findMany({
         where: siteId ? { siteId } : {},
         orderBy: { id: 'asc' },
         select: { id: true },
@@ -44,7 +44,7 @@ async function ids(siteId?: number): Promise<number[]> {
 afterAll(cleanup);
 
 beforeEach(async () => {
-    await prisma.backup.deleteMany();
+    await prisma.job.deleteMany();
     await prisma.site.deleteMany();
     await getSettings();
     await prisma.settings.update({ where: { id: 1 }, data: { retentionDays: 30 } });
@@ -75,25 +75,25 @@ describe('checkEnvironment', () => {
     });
 });
 
-describe('sweepInterruptedBackups', () => {
+describe('sweepInterruptedJobs', () => {
     it('fails the rows left pending or running, leaves the others alone', async () => {
         const site = await createSite('a.example.com');
         const pending = await createBackup(site, 'pending', 0);
         const running = await createBackup(site, 'running', 0);
         const success = await createBackup(site, 'success', 0);
 
-        expect(await boot.sweepInterruptedBackups()).toEqual(['a.example.com', 'a.example.com']);
-        expect(await boot.sweepInterruptedBackups()).toEqual([]);
+        expect(await boot.sweepInterruptedJobs()).toEqual(['a.example.com', 'a.example.com']);
+        expect(await boot.sweepInterruptedJobs()).toEqual([]);
 
         for (const id of [pending, running]) {
-            const row = await prisma.backup.findUniqueOrThrow({ where: { id } });
+            const row = await prisma.job.findUniqueOrThrow({ where: { id } });
             expect(row).toMatchObject({
                 status: 'error',
                 errorMessage: 'Interrupted by server restart',
             });
             expect(row.finishedAt).not.toBeNull();
         }
-        const untouched = await prisma.backup.findUniqueOrThrow({ where: { id: success } });
+        const untouched = await prisma.job.findUniqueOrThrow({ where: { id: success } });
         expect(untouched).toMatchObject({ status: 'success', errorMessage: null });
     });
 });
@@ -112,13 +112,13 @@ describe('boot', () => {
 
         const orphan = await createBackup(site, 'running', 0);
         await boot.boot();
-        expect((await prisma.backup.findUniqueOrThrow({ where: { id: orphan } })).status).toBe(
+        expect((await prisma.job.findUniqueOrThrow({ where: { id: orphan } })).status).toBe(
             'error',
         );
 
         const live = await createBackup(site, 'running', 0);
         await boot.boot();
-        expect((await prisma.backup.findUniqueOrThrow({ where: { id: live } })).status).toBe(
+        expect((await prisma.job.findUniqueOrThrow({ where: { id: live } })).status).toBe(
             'running',
         );
 
@@ -127,7 +127,7 @@ describe('boot', () => {
     });
 });
 
-describe('pruneBackups', () => {
+describe('pruneJobs', () => {
     it('deletes rows past the retention, keeping the last 5 per site and active rows', async () => {
         const a = await createSite('a.example.com');
         const b = await createSite('b.example.com');
@@ -141,7 +141,7 @@ describe('pruneBackups', () => {
         const oldB = [await createBackup(b, 'error', 100), await createBackup(b, 'success', 90)];
         const runningB = await createBackup(b, 'running', 80);
 
-        expect(await boot.pruneBackups(now)).toBe(4);
+        expect(await boot.pruneJobs(now)).toBe(4);
 
         expect(await ids(a)).toEqual([...oldA.slice(4), recentA]);
         expect(await ids(b)).toEqual([...oldB, runningB]);
@@ -153,7 +153,7 @@ describe('pruneBackups', () => {
         for (let i = 7; i >= 1; i--) rows.push(await createBackup(a, 'success', 40 + i));
         const stuck = await createBackup(a, 'pending', 60);
 
-        expect(await boot.pruneBackups(now)).toBe(3);
+        expect(await boot.pruneJobs(now)).toBe(3);
         expect(await ids(a)).toEqual([...rows.slice(3), stuck]);
     });
 
@@ -161,9 +161,9 @@ describe('pruneBackups', () => {
         const a = await createSite('a.example.com');
         // Oldest first, 15 to 10 days: only the oldest falls outside the last 5.
         for (let i = 5; i >= 0; i--) await createBackup(a, 'success', 10 + i);
-        expect(await boot.pruneBackups(now)).toBe(0);
+        expect(await boot.pruneJobs(now)).toBe(0);
 
         await prisma.settings.update({ where: { id: 1 }, data: { retentionDays: 12 } });
-        expect(await boot.pruneBackups(now)).toBe(1);
+        expect(await boot.pruneJobs(now)).toBe(1);
     });
 });

@@ -14,14 +14,14 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
-import type { BackupWithDomain } from '@/lib/db';
+import type { JobWithDomain } from '@/lib/db';
 import { formatDuration, formatSize, optionLabels } from '@/lib/format';
 
 const isActive = (status: string) => status === 'pending' || status === 'running';
 
 type ModalState =
-    | { mode: 'live'; backupId: number; domain: string; siteId: number }
-    | { mode: 'history'; backup: BackupWithDomain };
+    | { mode: 'live'; jobId: number; domain: string; siteId: number }
+    | { mode: 'history'; backup: JobWithDomain };
 
 export function BackupHistory({
     backups,
@@ -29,7 +29,7 @@ export function BackupHistory({
     siteId,
     statusFilter,
 }: {
-    backups: BackupWithDomain[];
+    backups: JobWithDomain[];
     showDomain?: boolean;
     /** Only this site's active backups are added as extra rows. */
     siteId?: number;
@@ -41,11 +41,11 @@ export function BackupHistory({
     const router = useRouter();
 
     // The row is the job: a pending or running row is followed live under its own id.
-    function handleRowClick(backup: BackupWithDomain) {
+    function handleRowClick(backup: JobWithDomain) {
         if (isActive(backup.status)) {
             setModal({
                 mode: 'live',
-                backupId: backup.id,
+                jobId: backup.id,
                 domain: backup.site.domain,
                 siteId: backup.siteId,
             });
@@ -87,7 +87,7 @@ export function BackupHistory({
                                 onClick={() =>
                                     setModal({
                                         mode: 'live',
-                                        backupId: job.id,
+                                        jobId: job.id,
                                         domain: job.domain,
                                         siteId: job.siteId,
                                     })
@@ -174,7 +174,7 @@ export function BackupHistory({
             {modal?.mode === 'live' && (
                 <LogModal
                     mode="live"
-                    backupId={modal.backupId}
+                    jobId={modal.jobId}
                     domain={modal.domain}
                     siteId={modal.siteId}
                     onClose={() => {
@@ -186,7 +186,7 @@ export function BackupHistory({
             {modal?.mode === 'history' && (
                 <LogModal
                     mode="history"
-                    backupId={modal.backup.id}
+                    jobId={modal.backup.id}
                     domain={modal.backup.site.domain}
                     siteId={modal.backup.siteId}
                     status={modal.backup.status}

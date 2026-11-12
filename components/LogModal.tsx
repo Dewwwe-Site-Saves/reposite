@@ -45,7 +45,7 @@ interface RunModeProps {
 // --- Live mode: stream logs for a pending or running backup ---
 interface LiveModeProps {
     mode: 'live';
-    backupId: number;
+    jobId: number;
     domain: string;
     siteId?: number;
     onClose: () => void;
@@ -54,7 +54,7 @@ interface LiveModeProps {
 // --- History mode: show stored log from DB ---
 interface HistoryModeProps extends RunStats, RunInfoFields {
     mode: 'history';
-    backupId: number;
+    jobId: number;
     domain: string;
     siteId?: number;
     status?: string;
@@ -95,8 +95,8 @@ export function LogModal(props: LogModalProps) {
 }
 
 /** Final stats of a backup from the detail route, once it is over. */
-async function fetchStats(backupId: number): Promise<RunStats> {
-    const res = await fetch(`/api/backups/${backupId}`);
+async function fetchStats(jobId: number): Promise<RunStats> {
+    const res = await fetch(`/api/jobs/${jobId}`);
     if (!res.ok) throw new Error('Backup not found');
     const data = await res.json();
     return {
@@ -111,8 +111,8 @@ async function fetchStats(backupId: number): Promise<RunStats> {
     };
 }
 
-async function cancelBackup(backupId: number): Promise<void> {
-    await fetch(`/api/backups/${backupId}/cancel`, { method: 'POST' });
+async function cancelJob(jobId: number): Promise<void> {
+    await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
 }
 
 // ============ Run Mode ============
@@ -121,7 +121,7 @@ function RunContent({ siteId, domain, onClose }: RunModeProps) {
     const { refresh } = useJobStatus();
     const [fullDownload, setFullDownload] = useState(false);
     const [skipGit, setSkipGit] = useState(false);
-    const [backupId, setBackupId] = useState<number | null>(null);
+    const [jobId, setJobId] = useState<number | null>(null);
     const [starting, setStarting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [startedAt, setStartedAt] = useState<string | null>(null);
@@ -133,7 +133,7 @@ function RunContent({ siteId, domain, onClose }: RunModeProps) {
         setStarting(true);
         setError(null);
         try {
-            const res = await fetch('/api/backups', {
+            const res = await fetch('/api/jobs', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ siteIds: [siteId], fullDownload, skipGit }),
@@ -141,7 +141,7 @@ function RunContent({ siteId, domain, onClose }: RunModeProps) {
             const data = await res.json();
             const queued = data.queued?.[0];
             if (res.ok && queued) {
-                setBackupId(queued.backupId);
+                setJobId(queued.jobId);
                 setRunStatus('pending');
                 void refresh();
             } else {
@@ -157,8 +157,8 @@ function RunContent({ siteId, domain, onClose }: RunModeProps) {
     function handleStatusChange(status: string, info: RunInfoFields) {
         setRunStatus(status);
         if (info.startedAt) setStartedAt(info.startedAt);
-        if (FINAL_STATUSES.has(status) && backupId) {
-            fetchStats(backupId)
+        if (FINAL_STATUSES.has(status) && jobId) {
+            fetchStats(jobId)
                 .then(setStats)
                 .catch(() => {});
         }
@@ -171,10 +171,10 @@ function RunContent({ siteId, domain, onClose }: RunModeProps) {
                 siteId={siteId}
                 status={runStatus}
                 onClose={onClose}
-                onCancel={backupId ? () => cancelBackup(backupId) : undefined}
+                onCancel={jobId ? () => cancelJob(jobId) : undefined}
             />
             <div className="flex-1 overflow-y-auto">
-                {!backupId ? (
+                {!jobId ? (
                     <div className="p-4 space-y-4">
                         {error && (
                             <div className="p-3 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-sm">
@@ -213,7 +213,7 @@ function RunContent({ siteId, domain, onClose }: RunModeProps) {
                             {...stats}
                         />
                         <CollapsibleLog open={logOpen} onToggle={() => setLogOpen(!logOpen)}>
-                            <LogStream backupId={backupId} onStatusChange={handleStatusChange} />
+                            <LogStream jobId={jobId} onStatusChange={handleStatusChange} />
                         </CollapsibleLog>
                     </>
                 )}
@@ -224,7 +224,7 @@ function RunContent({ siteId, domain, onClose }: RunModeProps) {
 
 // ============ Live Mode ============
 
-function LiveContent({ backupId, domain, siteId, onClose }: LiveModeProps) {
+function LiveContent({ jobId, domain, siteId, onClose }: LiveModeProps) {
     const [runStatus, setRunStatus] = useState<string | null>(null);
     const [info, setInfo] = useState<RunInfoFields & RunStats>({});
     const [logOpen, setLogOpen] = useState(true);
@@ -236,7 +236,7 @@ function LiveContent({ backupId, domain, siteId, onClose }: LiveModeProps) {
         setInfo((prev) => ({ ...prev, ...fields }));
         if (FINAL_STATUSES.has(status) && !statsFetched.current) {
             statsFetched.current = true;
-            fetchStats(backupId)
+            fetchStats(jobId)
                 .then((stats) => setInfo((prev) => ({ ...prev, ...stats })))
                 .catch(() => {});
         }
@@ -249,12 +249,12 @@ function LiveContent({ backupId, domain, siteId, onClose }: LiveModeProps) {
                 siteId={siteId}
                 status={runStatus}
                 onClose={onClose}
-                onCancel={() => cancelBackup(backupId)}
+                onCancel={() => cancelJob(jobId)}
             />
             <div className="flex-1 overflow-y-auto">
                 <RunInfo {...info} />
                 <CollapsibleLog open={logOpen} onToggle={() => setLogOpen(!logOpen)}>
-                    <LogStream backupId={backupId} onStatusChange={handleStatusChange} />
+                    <LogStream jobId={jobId} onStatusChange={handleStatusChange} />
                 </CollapsibleLog>
             </div>
         </>
@@ -264,7 +264,7 @@ function LiveContent({ backupId, domain, siteId, onClose }: LiveModeProps) {
 // ============ History Mode ============
 
 function HistoryContent({
-    backupId,
+    jobId,
     domain,
     siteId,
     status: initialStatus,
@@ -277,7 +277,7 @@ function HistoryContent({
     const [info, setInfo] = useState<RunStats & RunInfoFields>(initialInfo);
 
     useEffect(() => {
-        fetch(`/api/backups/${backupId}`)
+        fetch(`/api/jobs/${jobId}`)
             .then((res) => {
                 if (!res.ok) throw new Error('Backup not found');
                 return res.json();
@@ -304,7 +304,7 @@ function HistoryContent({
             .catch(() => {
                 setLogLines([{ time: '', level: 'error', msg: 'Failed to load the log' }]);
             });
-    }, [backupId]);
+    }, [jobId]);
 
     return (
         <>
@@ -522,10 +522,10 @@ function LogLine({ line }: { line: LogEntry }) {
 }
 
 function LogStream({
-    backupId,
+    jobId,
     onStatusChange,
 }: {
-    backupId: number;
+    jobId: number;
     onStatusChange?: (status: string, info: RunInfoFields) => void;
 }) {
     const [lines, setLines] = useState<LogEntry[]>([]);
@@ -540,7 +540,7 @@ function LogStream({
     useEffect(() => {
         setLines([]);
         setConnected(false);
-        const source = new EventSource(`/api/backups/${backupId}/stream`);
+        const source = new EventSource(`/api/jobs/${jobId}/stream`);
 
         // The browser reconnects after a dropped connection and the server replays the buffered lines: start from a clean slate each time.
         source.onopen = () => {
@@ -568,7 +568,7 @@ function LogStream({
 
         // Left open on error: EventSource retries by itself. `done` is the only close.
         return () => source.close();
-    }, [backupId]);
+    }, [jobId]);
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });

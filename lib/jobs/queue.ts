@@ -7,10 +7,10 @@ import { formatLog } from '../engine/logger';
 import type { LogEntry } from '../engine/types';
 import { filesDir } from '../paths';
 import { prisma } from '../prisma';
-import { ACTIVE_STATUSES, type BackupStatus, type TriggerType } from '../validation';
+import { ACTIVE_STATUSES, type JobStatus, type TriggerType } from '../validation';
 
 /**
- * DB-first job queue. The `Backup` row is the job: created as `pending` at enqueue time, claimed as `running` by the worker loop, updated with the engine result at the end. The only in-memory state is what cannot live in the database, the AbortController and the log buffer of the runs in progress, so a restart leaves nothing behind except rows to sweep.
+ * DB-first job queue. The `Job` row is the job: created as `pending` at enqueue time, claimed as `running` by the worker loop, updated with the engine result at the end. The only in-memory state is what cannot live in the database, the AbortController and the log buffer of the runs in progress, so a restart leaves nothing behind except rows to sweep.
  */
 
 export interface EnqueueOptions {
@@ -20,27 +20,27 @@ export interface EnqueueOptions {
 }
 
 export interface LogEvent {
-    backupId: number;
+    jobId: number;
     entry: LogEntry;
 }
 
 /** Emitted when the worker claims a pending row. */
 export interface StatusEvent {
-    backupId: number;
+    jobId: number;
     status: 'running';
     /** ISO 8601 */
     startedAt: string;
 }
 
 export interface DoneEvent {
-    backupId: number;
-    status: BackupStatus;
+    jobId: number;
+    status: JobStatus;
 }
 
-export interface BackupListeners {
+export interface JobListeners {
     onLog?: (entry: LogEntry) => void;
     onStatus?: (event: StatusEvent) => void;
-    onDone: (status: BackupStatus) => void;
+    onDone: (status: JobStatus) => void;
 }
 
 export interface Subscription {
@@ -50,10 +50,10 @@ export interface Subscription {
 }
 
 /** Thrown by `enqueue` when the site already has a pending or running backup. */
-export class BackupConflictError extends Error {
+export class JobConflictError extends Error {
     constructor(siteId: number) {
         super(`A backup is already pending or running for site ${siteId}`);
-        this.name = 'BackupConflictError';
+        this.name = 'JobConflictError';
     }
 }
 
@@ -82,9 +82,9 @@ interface QueueState {
 }
 
 // Process-wide singleton on globalThis: `next dev` hot reloads keep the running jobs and the listeners, and in production the boot hook and the route bundles may not share a module instance.
-const globalForQueue = globalThis as unknown as { backupQueue?: QueueState };
+const globalForQueue = globalThis as unknown as { jobQueue?: QueueState };
 
-const state: QueueState = (globalForQueue.backupQueue ??= {
+const state: QueueState = (globalForQueue.jobQueue ??= {
     running: new Map(),
     events: new EventEmitter<QueueEvents>({ captureRejections: false }),
     enqueueLock: Promise.resolve(),
@@ -96,27 +96,27 @@ state.events.setMaxListeners(100);
 export const events = state.events;
 
 /**
- * Creates the `pending` Backup row and returns its id. Rejects with `BackupConflictError` when the site already has an active backup. The check and the insert run under an in-process lock rather than a database transaction: the app is a single process, so the lock is enough, and it keeps the queue off Prisma interactive transactions on the single-connection better-sqlite3 adapter.
+ * Creates the `pending` Job row and returns its id. Rejects with `JobConflictError` when the site already has an active backup. The check and the insert run under an in-process lock rather than a database transaction: the app is a single process, so the lock is enough, and it keeps the queue off Prisma interactive transactions on the single-connection better-sqlite3 adapter.
  */
 export async function enqueue(siteId: number, options: EnqueueOptions = {}): Promise<number> {
     const insert = () => insertPending(siteId, options);
     const result = state.enqueueLock.then(insert, insert);
     state.enqueueLock = result.catch(() => undefined);
-    const backupId = await result;
+    const jobId = await result;
     dispatch();
-    return backupId;
+    return jobId;
 }
 
 async function insertPending(siteId: number, options: EnqueueOptions): Promise<number> {
     if (!(await getSite(siteId))) throw new Error(`Site not found: ${siteId}`);
 
-    const active = await prisma.backup.findFirst({
+    const active = await prisma.job.findFirst({
         where: { siteId, status: { in: [...ACTIVE_STATUSES] } },
         select: { id: true },
     });
-    if (active) throw new BackupConflictError(siteId);
+    if (active) throw new JobConflictError(siteId);
 
-    const backup = await prisma.backup.create({
+    const created = await prisma.job.create({
         data: {
             siteId,
             triggerType: options.triggerType ?? 'manual',
@@ -125,22 +125,22 @@ async function insertPending(siteId: number, options: EnqueueOptions): Promise<n
         },
         select: { id: true },
     });
-    return backup.id;
+    return created.id;
 }
 
 /**
  * Pending: marked `cancelled` right away. Running: the engine is asked to stop and stores the final status itself. Returns false when the backup is unknown or already finished.
  */
-export async function cancel(backupId: number): Promise<boolean> {
-    const pending = await prisma.backup.updateMany({
-        where: { id: backupId, status: 'pending' },
+export async function cancel(jobId: number): Promise<boolean> {
+    const pending = await prisma.job.updateMany({
+        where: { id: jobId, status: 'pending' },
         data: { status: 'cancelled', finishedAt: new Date(), errorMessage: 'Cancelled by user' },
     });
     if (pending.count === 1) {
-        state.events.emit('done', { backupId, status: 'cancelled' });
+        state.events.emit('done', { jobId, status: 'cancelled' });
         return true;
     }
-    const job = state.running.get(backupId);
+    const job = state.running.get(jobId);
     if (!job) return false;
     job.abort.abort();
     return true;
@@ -149,15 +149,15 @@ export async function cancel(backupId: number): Promise<boolean> {
 /**
  * Registers listeners for one backup and returns the lines buffered so far, both in the same tick, so nothing emitted in between can be missed. The listeners are removed on `done`.
  */
-export function subscribe(backupId: number, listeners: BackupListeners): Subscription {
+export function subscribe(jobId: number, listeners: JobListeners): Subscription {
     const onLog = (event: LogEvent) => {
-        if (event.backupId === backupId) listeners.onLog?.(event.entry);
+        if (event.jobId === jobId) listeners.onLog?.(event.entry);
     };
     const onStatus = (event: StatusEvent) => {
-        if (event.backupId === backupId) listeners.onStatus?.(event);
+        if (event.jobId === jobId) listeners.onStatus?.(event);
     };
     const onDone = (event: DoneEvent) => {
-        if (event.backupId !== backupId) return;
+        if (event.jobId !== jobId) return;
         unsubscribe();
         listeners.onDone(event.status);
     };
@@ -169,7 +169,7 @@ export function subscribe(backupId: number, listeners: BackupListeners): Subscri
     state.events.on('log', onLog);
     state.events.on('status', onStatus);
     state.events.on('done', onDone);
-    return { lines: [...(state.running.get(backupId)?.logLines ?? [])], unsubscribe };
+    return { lines: [...(state.running.get(jobId)?.logLines ?? [])], unsubscribe };
 }
 
 /** Worker loop: one fill pass at a time, re-entered after every enqueue and every completion. A pass with nothing to claim costs two reads. */
@@ -182,7 +182,7 @@ function dispatch(): void {
 async function fillSlots(): Promise<void> {
     const { concurrency } = await getSettings();
     while (state.running.size < concurrency) {
-        const next = await prisma.backup.findFirst({
+        const next = await prisma.job.findFirst({
             where: { status: 'pending' },
             orderBy: { id: 'asc' },
             select: {
@@ -199,7 +199,7 @@ async function fillSlots(): Promise<void> {
         const job: RunningJob = { abort: new AbortController(), logLines: [] };
         state.running.set(next.id, job);
         const startedAt = new Date();
-        const claimed = await prisma.backup.updateMany({
+        const claimed = await prisma.job.updateMany({
             where: { id: next.id, status: 'pending' },
             data: { status: 'running', startedAt },
         });
@@ -209,7 +209,7 @@ async function fillSlots(): Promise<void> {
             continue;
         }
         state.events.emit('status', {
-            backupId: next.id,
+            jobId: next.id,
             status: 'running',
             startedAt: startedAt.toISOString(),
         });
@@ -217,19 +217,19 @@ async function fillSlots(): Promise<void> {
     }
 }
 
-async function run(backup: PendingRow, job: RunningJob): Promise<void> {
-    const backupId = backup.id;
+async function run(row: PendingRow, job: RunningJob): Promise<void> {
+    const jobId = row.id;
     const onLog = (entry: LogEntry) => {
         job.logLines.push(entry);
-        state.events.emit('log', { backupId, entry });
+        state.events.emit('log', { jobId, entry });
     };
 
-    let status: BackupStatus;
+    let status: JobStatus;
     try {
-        let final: Parameters<typeof prisma.backup.updateMany>[0]['data'];
+        let final: Parameters<typeof prisma.job.updateMany>[0]['data'];
         try {
             const [site, github, sharepoint] = await Promise.all([
-                getSiteConfig(backup.siteId),
+                getSiteConfig(row.siteId),
                 getGithubConfig(),
                 getSharePointConfig(),
             ]);
@@ -238,9 +238,9 @@ async function run(backup: PendingRow, job: RunningJob): Promise<void> {
 
             const result = await runBackup(site, github, sharepoint, {
                 localRoot: path.join(filesDir(), site.repo),
-                triggerType: backup.triggerType as TriggerType,
-                fullDownload: backup.fullDownload,
-                skipGit: backup.skipGit,
+                triggerType: row.triggerType as TriggerType,
+                fullDownload: row.fullDownload,
+                skipGit: row.skipGit,
                 signal: job.abort.signal,
                 onLog,
             });
@@ -273,13 +273,13 @@ async function run(backup: PendingRow, job: RunningJob): Promise<void> {
             };
         }
         // updateMany rather than update: deleting the site cascades to the row while it runs.
-        await prisma.backup.updateMany({ where: { id: backupId }, data: final });
+        await prisma.job.updateMany({ where: { id: jobId }, data: final });
     } catch (error) {
         status = 'error';
-        console.error(`[queue] backup ${backupId}: ${errorMessage(error)}`);
+        console.error(`[queue] job ${jobId}: ${errorMessage(error)}`);
     } finally {
         // Gone from the running set before listeners hear about it.
-        state.running.delete(backupId);
+        state.running.delete(jobId);
     }
-    state.events.emit('done', { backupId, status });
+    state.events.emit('done', { jobId, status });
 }

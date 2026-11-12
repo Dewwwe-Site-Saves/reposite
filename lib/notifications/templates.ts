@@ -12,7 +12,7 @@ export const LOG_TAIL_LINES = 30;
 export interface FailureMailInput {
     domain: string;
     siteId: number;
-    backupId: number;
+    jobId: number;
     triggerType: string;
     startedAt: Date | null;
     finishedAt: Date | null;
@@ -45,7 +45,7 @@ export function failureMail(input: FailureMailInput): Mail {
     const tail = logTail(input.log);
 
     const text = [
-        `Backup #${input.backupId} of ${input.domain} failed.`,
+        `Backup #${input.jobId} of ${input.domain} failed.`,
         '',
         ...rows.map(([label, value]) => `${label}: ${value}`),
         ...(link ? ['', `History: ${link}`] : []),
@@ -53,7 +53,7 @@ export function failureMail(input: FailureMailInput): Mail {
     ].join('\n');
 
     const html = [
-        `<p>Backup #${input.backupId} of <strong>${escapeHtml(input.domain)}</strong> failed.</p>`,
+        `<p>Backup #${input.jobId} of <strong>${escapeHtml(input.domain)}</strong> failed.</p>`,
         table(rows),
         link ? `<p><a href="${escapeHtml(link)}">Open the history</a></p>` : '',
         tail.length > 0

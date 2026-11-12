@@ -9,18 +9,18 @@ Reposite mirrors every site into a local git clone (`<DATA_DIR>/files/<repo>/www
 Decisions taken with the maintainer (2026-09-06):
 
 - Scanner = pure engine module under `lib/engine/scan/`, input is a local root. Rules live in code, versioned and tested; the configuration is ignore rules.
-- Job model = "run with steps": `Backup` gains `skipDump`, `skipSync`, `skipScan` next to `skipGit`. A scan-only run is a run with only the scan step. Same queue, log stream, cancel and boot sweep.
-- Persistence = `Scan`, `Finding`, `ScanIgnore` tables, not columns on `Backup`.
+- Job model = "run with steps": `Job` gains `skipDump`, `skipSync`, `skipScan` next to `skipGit`. A scan-only run is a run with only the scan step. Same queue, log stream, cancel and boot sweep.
+- Persistence = `Scan`, `Finding`, `ScanIgnore` tables, not columns on `Job`.
 - Rule families for v1: files and patterns, changes since the last snapshot, database dump. Core checksums via `api.wordpress.org` deferred (ROADMAP). No `fullScan` flag: the file family always walks the full tree and nothing would read it.
 - Custom folder scans read a relative path under `SCAN_DIR` (default `<DATA_DIR>/scan`: the operator drops folders into the existing data volume, no compose change). Upload deferred.
 - The scan verdict never changes a backup's status: an infected site is still backed up. A scan-only run fails only when the scanner itself fails.
 - Two engine entry points: `runBackup` keeps its `SiteConfig` contract, `runFolderScan` handles folders. Both call the same `scanStep`.
-- Five commits, each leaving the app deployable: typecheck and tests green, the default backup flow unchanged, each migration additive and applicable on the production database, and a concrete verification per phase. The `Backup` table rebuild (nullable `siteId`) is isolated in phase 5.
+- Five commits, each leaving the app deployable: typecheck and tests green, the default backup flow unchanged, each migration additive and applicable on the production database, and a concrete verification per phase. The `Job` table rebuild (nullable `siteId`) is isolated in phase 5.
 
 ## Data model (final state)
 
 ```prisma
-model Backup {
+model Job {
   site      Site?   @relation(fields: [siteId], references: [id], onDelete: Cascade)
   siteId    Int?                       // phase 5: null for a folder scan
   scanPath  String?                    // phase 5: relative to SCAN_DIR
@@ -34,8 +34,8 @@ model Backup {
 
 model Scan {
   id            Int      @id @default(autoincrement())
-  backup        Backup   @relation(fields: [backupId], references: [id], onDelete: Cascade)
-  backupId      Int      @unique
+  job           Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  jobId         Int      @unique
   site          Site?    @relation(fields: [siteId], references: [id], onDelete: Cascade)
   siteId        Int?
   scanPath      String?                // phase 5
@@ -148,7 +148,7 @@ Verify: `npm run typecheck`, `npm test`. Then `npx tsx scripts/smoke-scan.ts dat
 
 Commit `scan: run step flags, scan tables and the scan step after the sync`.
 
-Migration `prisma/migrations/<ts>_scan/` generated with `prisma migrate dev` then renamed to the hand-named convention: `ALTER TABLE ADD COLUMN` for `Backup.skipDump/skipSync/skipScan` and `Settings.scanOnBackup`, `CREATE TABLE` for `Scan`, `Finding`, `ScanIgnore` (without `scanPath`), indexes. Purely additive, no rebuild. No `;` inside literals: `lib/testing/db.ts` replays migrations by splitting on `;`.
+Migration `prisma/migrations/<ts>_scan/` generated with `prisma migrate dev` then renamed to the hand-named convention: `ALTER TABLE ADD COLUMN` for `Job.skipDump/skipSync/skipScan` and `Settings.scanOnBackup`, `CREATE TABLE` for `Scan`, `Finding`, `ScanIgnore` (without `scanPath`), indexes. Purely additive, no rebuild. No `;` inside literals: `lib/testing/db.ts` replays migrations by splitting on `;`.
 
 `lib/engine/git.ts`, three helpers sharing one `--name-status -z` parser (in `-z`, `R*` and `C*` entries carry two paths: a rename counts as delete plus add, that is the test to write):
 
@@ -171,15 +171,15 @@ Migration `prisma/migrations/<ts>_scan/` generated with `prisma migrate dev` the
 
 Scan block: `changes = skipSync ? lastTags → changedFiles : stagedChanges`, then `scanStep`. Failure is `log.warn('Security scan failed: ...')` and `scan = null`, status untouched, same shape as `publishRelease`; cancellation rethrown. Ordering constraint: after the staging, before `commitAndTag`. `BackupOptions` gains the three flags and `ignores?`; `BackupResult` gains `scan: ScanReport | null`.
 
-`lib/db.ts`: `listScanIgnores(siteId | null)` (global plus site), `saveScan({ backupId, siteId, report, startedAt, finishedAt })` (two reads for the baseline, counts in JS excluding ignored, one nested `prisma.scan.create` with `findings: { createMany }`, no interactive transaction on the single-connection adapter), `getLastScan(siteId)`.
+`lib/db.ts`: `listScanIgnores(siteId | null)` (global plus site), `saveScan({ jobId, siteId, report, startedAt, finishedAt })` (two reads for the baseline, counts in JS excluding ignored, one nested `prisma.scan.create` with `findings: { createMany }`, no interactive transaction on the single-connection adapter), `getLastScan(siteId)`.
 
 `lib/jobs/queue.ts`: `EnqueueOptions` gains the three optional flags; `insertPending` resolves `skipScan ?? !settings.scanOnBackup` inside the lock; `PendingRow` and the select gain the flags; `run` loads the ignores next to the configs, passes the flags, and calls `saveScan` after the `backup.updateMany` so a `saveScan` failure (caught, logged) cannot lose the run result.
 
-API and UI, enough to observe the phase: `runBackupSchema` and `settingsSchema` accept the flags and `scanOnBackup`; `POST /api/backups` forwards them; `GET /api/backups/[id]` includes the scan counts; the run dialog (`RunContent` in `LogModal.tsx`) gains the three switches next to the existing two; the Settings page gains a "Security" block with the "Scan on backup" switch; `lib/format.ts` option labels.
+API and UI, enough to observe the phase: `runBackupSchema` and `settingsSchema` accept the flags and `scanOnBackup`; `POST /api/jobs` forwards them; `GET /api/jobs/[id]` includes the scan counts; the run dialog (`RunContent` in `LogModal.tsx`) gains the three switches next to the existing two; the Settings page gains a "Security" block with the "Scan on backup" switch; `lib/format.ts` option labels.
 
 Tests: `git.test.ts` (rename, untracked staged, unborn branch, `lastTags`); `backup.test.ts` (each flag; a planted `www/wp-content/uploads/shell.php` in the fake remote gives a critical in `result.scan`; a throwing rule leaves `success`; scan-only makes no remote call); `db.test.ts` for `saveScan` (`isNew` false on an identical second run, true for a new fingerprint, ignored flagged, counts); `queue.test.ts` (`skipScan` default from the setting, override, cancel writes no Scan).
 
-Verify: migration applied on a copy of the production database (propose the commands, `prisma migrate deploy`), every `Backup` row survives with the flags at false. With "Scan on backup" off, a run is byte for byte the previous code path. With it on, one extra log line and one `Scan` row. From the run dialog: a backup with the scan, then a scan-only run (fast, no FTP, no push). Insert a `ScanIgnore` row by hand, rerun scan-only, the finding comes back `ignored = 1` and the counts drop.
+Verify: migration applied on a copy of the production database (propose the commands, `prisma migrate deploy`), every `Job` row survives with the flags at false. With "Scan on backup" off, a run is byte for byte the previous code path. With it on, one extra log line and one `Scan` row. From the run dialog: a backup with the scan, then a scan-only run (fast, no FTP, no push). Insert a `ScanIgnore` row by hand, rerun scan-only, the finding comes back `ignored = 1` and the counts drop.
 
 Docs: CLAUDE.md (engine, queue, API table, settings), README (what a run does), ROADMAP.
 
@@ -195,9 +195,9 @@ API (house pattern: `apiHandler`, `dynamic = 'force-dynamic'`, `requireRole('adm
 | GET | `/api/scans/[id]` | scan with findings, `?includeIgnored=1` |
 | GET / POST | `/api/scan-ignores` | `scanIgnoreCreateSchema` with a `superRefine` requiring at least one of `ruleId` / `pathGlob` / `fingerprint`; POST also runs `markIgnored` on the latest scans |
 | DELETE | `/api/scan-ignores/[id]` | next scan surfaces the findings again |
-| GET | `/api/backups` | `?kind=backup|scan` |
+| GET | `/api/jobs` | `?kind=backup|scan` |
 
-`lib/db.ts`: `getSecurityOverview()` (latest scan per site with counts and `newCount`, plus the cross-site rule table: per `ruleId`, sites and files affected, from the latest scan of each site, non-ignored), `getSiteScanReport(siteId, scanId?)` (a scan with its findings, default the latest), `listScans(siteId)` (history with counts), `createScanIgnore` + `markIgnored` (compiled with `compileIgnores`), `deleteScanIgnore`. `lib/format.ts`: `runKind(row)` = scan when `skipDump && skipSync`, mirrored once in the `listBackups` where clause. Rule metadata (`title`, `description`, `remediation`, `severity`) is exposed to the UI through a `RULE_CATALOG` in `lib/constants.ts` derived from the registry at build time of the module (client components value-import `constants.ts` only).
+`lib/db.ts`: `getSecurityOverview()` (latest scan per site with counts and `newCount`, plus the cross-site rule table: per `ruleId`, sites and files affected, from the latest scan of each site, non-ignored), `getSiteScanReport(siteId, scanId?)` (a scan with its findings, default the latest), `listScans(siteId)` (history with counts), `createScanIgnore` + `markIgnored` (compiled with `compileIgnores`), `deleteScanIgnore`. `lib/format.ts`: `runKind(row)` = scan when `skipDump && skipSync`, mirrored once in the `listJobs` where clause. Rule metadata (`title`, `description`, `remediation`, `severity`) is exposed to the UI through a `RULE_CATALOG` in `lib/constants.ts` derived from the registry at build time of the module (client components value-import `constants.ts` only).
 
 Findings are never shown as a flat log. Three levels, labels in English:
 
@@ -219,7 +219,7 @@ Commit `notifications: mail on new findings`.
 
 - Migration `<ts>_settings_notify_findings`: `Settings.notifyOnFindings`.
 - `lib/validation.ts`: the SMTP-completeness `superRefine` iterates `NOTIFY_SWITCHES = ['notifyOnError', 'notifyOnFindings']`, same 400 naming the field.
-- `lib/notifications/notifier.ts`: subscribe to every terminal status except `cancelled`; `notifyFindings(backupId)` gates on the `Scan` row, not the run status (a failed push still has a valid scan): switch on, SMTP complete, findings `isNew && !ignored && severity in (critical, warning)`, critical first, capped at 50 with "and N more". Drop-and-log like failures.
+- `lib/notifications/notifier.ts`: subscribe to every terminal status except `cancelled`; `notifyFindings(jobId)` gates on the `Scan` row, not the run status (a failed push still has a valid scan): switch on, SMTP complete, findings `isNew && !ignored && severity in (critical, warning)`, critical first, capped at 50 with "and N more". Drop-and-log like failures.
 - `lib/notifications/templates.ts`: `findingsMail(input)` text + HTML, subject `[Reposite] Security: N new finding(s) on <label>`, grouped by severity with the rule title, link `${appUrl}/security/<siteId>` (the report), reuse `table()` and `escapeHtml()`.
 - `components/SettingsForm.tsx`: "Security findings" switch next to "Errors", description "A mail when a run finds something new. Needs the SMTP block below."
 
@@ -233,13 +233,13 @@ Docs: CLAUDE.md notifications and API table, README, ROADMAP production checks.
 
 Commit `scan: folder scans from the scan directory`.
 
-- Migration `<ts>_scan_path`: `Scan.scanPath` + index, and the `Backup` rebuild (nullable `siteId`, `scanPath`, index) under `PRAGMA defer_foreign_keys`. Before committing, check the generated `INSERT ... SELECT` lists `skipDump/skipSync/skipScan`, and replay on a copy holding real `Scan` rows so the FK from `Scan` survives the rebuild. `Backup.site` becomes optional on both sides, `onDelete` stays `Cascade`.
+- Migration `<ts>_scan_path`: `Scan.scanPath` + index, and the `Job` rebuild (nullable `siteId`, `scanPath`, index) under `PRAGMA defer_foreign_keys`. Before committing, check the generated `INSERT ... SELECT` lists `skipDump/skipSync/skipScan`, and replay on a copy holding real `Scan` rows so the FK from `Scan` survives the rebuild. `Job.site` becomes optional on both sides, `onDelete` stays `Cascade`.
 - `lib/paths.ts`: `scanDir()` (`SCAN_DIR` or `<DATA_DIR>/scan`) and `resolveScanPath(rel)` (resolve, prefix check, `realpathSync.native` on both, re-check: refuses `..`, absolute paths and escaping symlinks), every join with `/*turbopackIgnore: true*/`. `ensureDataDirs` creates it, ignoring `EACCES`/`EROFS` for a read-only mount. `next.config.js`: `./scan/**` in the tracing excludes.
 - `lib/validation.ts`: `scanPathSchema` in the shape of `webRootPathSchema`; `runBackupSchema` gains `scanPath`, mutually exclusive with `siteIds`.
 - `lib/engine/scan-run.ts`: `runFolderScan({ root, label, ignores, signal, onLog })` returning a `BackupResult`: `scanStep` with no `changedFiles`, sync and dump stats at zero, here a scanner failure is the run's outcome.
-- `lib/jobs/queue.ts`: new export `enqueueFolderScan(scanPath)` next to the untouched `enqueue`, both through `insertPending` under the lock; conflict key `siteId` or `scanPath`; `BackupConflictError` takes a label; `run` branches on `scanPath` and skips `getSiteConfig` / `getGithubConfig` so a folder scan works without a GitHub token; `saveScan` baselines on `scanPath`.
-- Nullable `siteId` fallout, all through one `backupLabel(row)` helper in `lib/db.ts`: `listActiveBackups`, `boot.ts` sweep, `notifier.ts` failure mail, `app/api/backups/[id]/stream/route.ts`, `BackupHistory.tsx`. `pruneBackups` in `boot.ts` gets a second pass over distinct `scanPath` values with the same keep-last-N rule.
-- API: `POST /api/backups` with `{ scanPath }` resolves it, 400 when missing or not a directory, calls `enqueueFolderScan`. Security page: "Scan a folder" form in `ScanActions.tsx` (relative path, top-level entries of `SCAN_DIR` as suggestions), folder scans in their own group.
+- `lib/jobs/queue.ts`: new export `enqueueFolderScan(scanPath)` next to the untouched `enqueue`, both through `insertPending` under the lock; conflict key `siteId` or `scanPath`; `JobConflictError` takes a label; `run` branches on `scanPath` and skips `getSiteConfig` / `getGithubConfig` so a folder scan works without a GitHub token; `saveScan` baselines on `scanPath`.
+- Nullable `siteId` fallout, all through one `backupLabel(row)` helper in `lib/db.ts`: `listActiveJobs`, `boot.ts` sweep, `notifier.ts` failure mail, `app/api/jobs/[id]/stream/route.ts`, `BackupHistory.tsx`. `pruneJobs` in `boot.ts` gets a second pass over distinct `scanPath` values with the same keep-last-N rule.
+- API: `POST /api/jobs` with `{ scanPath }` resolves it, 400 when missing or not a directory, calls `enqueueFolderScan`. Security page: "Scan a folder" form in `ScanActions.tsx` (relative path, top-level entries of `SCAN_DIR` as suggestions), folder scans in their own group.
 - Docker: `docker-entrypoint.sh` creates and chowns `$DATA_DIR/scan` with `files` and `sp-certificates`; `.env.example` documents `SCAN_DIR`; `docker-compose.yml` gets only a commented optional block (`- ${REPOSITE_SCAN}:/scan:ro` + `SCAN_DIR=/scan`), no mandatory variable so existing stacks redeploy unchanged.
 
 Tests: `paths.test.ts` (`resolveScanPath` cases), `scan-run.test.ts` (temp tree success, missing folder error), `queue.test.ts` (same path conflicts, folder scan and site backup do not, runs without a GitHub token), `boot.test.ts` (prune of `scanPath` rows).

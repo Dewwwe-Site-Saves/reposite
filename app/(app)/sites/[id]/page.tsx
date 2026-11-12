@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getSettings, getSite, listBackups } from '@/lib/db';
-import { backupsQuerySchema, parseId } from '@/lib/validation';
+import { getSettings, getSite, listJobs } from '@/lib/db';
+import { jobsQuerySchema, parseId } from '@/lib/validation';
 import { RunBackupButton } from '@/components/BackupActions';
 import { BackupHistory } from '@/components/BackupHistory';
 import { PageHeader } from '@/components/PageHeader';
@@ -17,7 +17,7 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
     if (!site) notFound();
 
     const [backups, settings] = await Promise.all([
-        listBackups(backupsQuerySchema.parse({ siteId: site.id, pageSize: 20 })),
+        listJobs(jobsQuerySchema.parse({ siteId: site.id, pageSize: 20 })),
         getSettings(),
     ]);
 

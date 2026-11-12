@@ -32,10 +32,10 @@ model Site {
   enabled      Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-  backups      Backup[]
+  jobs         Job[]
 }
 
-model Backup {
+model Job {
   id              Int       @id @default(autoincrement())
   site            Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
   siteId          Int
@@ -76,7 +76,7 @@ model Settings {
   spDateField      String?
   defaultCron      String   @default("0 2 1,15 * *") // 1st and 15th of the month at 02:00
   concurrency      Int      @default(2)
-  retentionDays    Int      @default(90) // prune Backup rows older than this
+  retentionDays    Int      @default(90) // prune Job rows older than this
   notifyOnError    Boolean  @default(false) // mail on every failed run (needs the SMTP block below)
   notifyTo         String? // recipients, comma-separated
   smtpHost         String?

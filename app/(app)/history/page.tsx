@@ -4,8 +4,8 @@ import { HistoryFilters } from '@/components/HistoryFilters';
 import { PageHeader } from '@/components/PageHeader';
 import { Pagination } from '@/components/Pagination';
 import { Card, CardContent } from '@/components/ui/card';
-import { listBackups, listSites } from '@/lib/db';
-import { backupsQuerySchema, type BackupsQuery } from '@/lib/validation';
+import { listJobs, listSites } from '@/lib/db';
+import { jobsQuerySchema, type JobsQuery } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,17 +16,17 @@ const PAGE_SIZE = 25;
 type SearchParams = Record<string, string | string[] | undefined>;
 
 /** Filters and page from the URL; anything malformed falls back to the first unfiltered page. */
-function parseQuery(params: SearchParams): BackupsQuery {
+function parseQuery(params: SearchParams): JobsQuery {
     const raw = Object.fromEntries(
         ['siteId', 'status', 'page']
             .map((key) => [key, params[key]] as const)
             .filter(([, value]) => typeof value === 'string' && value !== ''),
     );
-    const parsed = backupsQuerySchema.safeParse({ ...raw, pageSize: PAGE_SIZE });
-    return parsed.success ? parsed.data : backupsQuerySchema.parse({ pageSize: PAGE_SIZE });
+    const parsed = jobsQuerySchema.safeParse({ ...raw, pageSize: PAGE_SIZE });
+    return parsed.success ? parsed.data : jobsQuerySchema.parse({ pageSize: PAGE_SIZE });
 }
 
-function pageHref(query: BackupsQuery, page: number): string {
+function pageHref(query: JobsQuery, page: number): string {
     const params = new URLSearchParams();
     if (query.siteId) params.set('siteId', String(query.siteId));
     if (query.status) params.set('status', query.status);
@@ -41,7 +41,7 @@ export default async function HistoryPage({
     searchParams: Promise<SearchParams>;
 }) {
     const query = parseQuery(await searchParams);
-    const [backups, sites] = await Promise.all([listBackups(query), listSites()]);
+    const [backups, sites] = await Promise.all([listJobs(query), listSites()]);
     const filtered = query.siteId !== undefined || query.status !== undefined;
 
     return (

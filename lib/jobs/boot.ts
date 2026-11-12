@@ -31,7 +31,7 @@ export async function boot(): Promise<void> {
     await initDatabase();
 
     if (!state.booted) {
-        const swept = await sweepInterruptedBackups();
+        const swept = await sweepInterruptedJobs();
         if (swept.length > 0) {
             console.warn(`[boot] ${swept.length} backup(s) interrupted by the last restart`);
             // In the background: the first request must not wait for the mail server.
@@ -73,14 +73,14 @@ export function checkEnvironment(): void {
 }
 
 /** Rows still `pending` or `running` at start-up belonged to the previous process: nothing will ever finish them. Returns the domain of each row swept, for the notification. */
-export async function sweepInterruptedBackups(): Promise<string[]> {
-    const rows = await prisma.backup.findMany({
+export async function sweepInterruptedJobs(): Promise<string[]> {
+    const rows = await prisma.job.findMany({
         where: { status: { in: [...ACTIVE_STATUSES] } },
         select: { id: true, site: { select: { domain: true } } },
         orderBy: { id: 'asc' },
     });
     if (rows.length === 0) return [];
-    await prisma.backup.updateMany({
+    await prisma.job.updateMany({
         where: { id: { in: rows.map((row) => row.id) } },
         data: {
             status: 'error',
@@ -92,20 +92,20 @@ export async function sweepInterruptedBackups(): Promise<string[]> {
 }
 
 /** Deletes backups older than `Settings.retentionDays`, always keeping the last `RETENTION_KEEP_LAST` per site and never an active one. Returns the number of rows deleted. */
-export async function pruneBackups(now = new Date()): Promise<number> {
+export async function pruneJobs(now = new Date()): Promise<number> {
     const { retentionDays } = await getSettings();
     const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
     const sites = await prisma.site.findMany({ select: { id: true } });
 
     let deleted = 0;
     for (const site of sites) {
-        const kept = await prisma.backup.findMany({
+        const kept = await prisma.job.findMany({
             where: { siteId: site.id },
             orderBy: { id: 'desc' },
             take: RETENTION_KEEP_LAST,
             select: { id: true },
         });
-        const { count } = await prisma.backup.deleteMany({
+        const { count } = await prisma.job.deleteMany({
             where: {
                 siteId: site.id,
                 id: { notIn: kept.map((b) => b.id) },
@@ -120,7 +120,7 @@ export async function pruneBackups(now = new Date()): Promise<number> {
 
 async function runRetention(): Promise<void> {
     try {
-        const deleted = await pruneBackups();
+        const deleted = await pruneJobs();
         if (deleted > 0) console.log(`[retention] deleted ${deleted} old backup(s)`);
     } catch (error) {
         console.error(`[retention] ${errorMessage(error)}`);

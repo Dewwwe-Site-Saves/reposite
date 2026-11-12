@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-    backupsQuerySchema,
+    jobsQuerySchema,
     cronSchema,
     domainSchema,
     parseId,
@@ -182,11 +182,11 @@ describe('settingsSchema', () => {
     });
 });
 
-describe('backupsQuerySchema', () => {
+describe('jobsQuerySchema', () => {
     it('coerces query strings with defaults', () => {
-        expect(backupsQuerySchema.parse({})).toEqual({ page: 1, pageSize: 20 });
+        expect(jobsQuerySchema.parse({})).toEqual({ page: 1, pageSize: 20 });
         expect(
-            backupsQuerySchema.parse({ siteId: '3', status: 'error', page: '2', pageSize: '50' }),
+            jobsQuerySchema.parse({ siteId: '3', status: 'error', page: '2', pageSize: '50' }),
         ).toEqual({
             siteId: 3,
             status: 'error',
@@ -196,8 +196,8 @@ describe('backupsQuerySchema', () => {
     });
 
     it('rejects unknown statuses and oversized pages', () => {
-        expect(backupsQuerySchema.safeParse({ status: 'done' }).success).toBe(false);
-        expect(backupsQuerySchema.safeParse({ pageSize: '500' }).success).toBe(false);
+        expect(jobsQuerySchema.safeParse({ status: 'done' }).success).toBe(false);
+        expect(jobsQuerySchema.safeParse({ pageSize: '500' }).success).toBe(false);
     });
 });
 

@@ -18,15 +18,15 @@ export function start(): void {
     state.started = true;
     events.on('done', (event: DoneEvent) => {
         if (event.status !== 'error') return;
-        notifyBackupFailed(event.backupId).catch((error) => {
-            console.error(`[notify] backup ${event.backupId}: ${errorMessage(error)}`);
+        notifyBackupFailed(event.jobId).catch((error) => {
+            console.error(`[notify] backup ${event.jobId}: ${errorMessage(error)}`);
         });
     });
 }
 
 /** Mails the failure of one backup. Returns false when nothing was sent: notifications off, SMTP incomplete, or the row gone (the site was deleted during the run). */
 export async function notifyBackupFailed(
-    backupId: number,
+    jobId: number,
     send: MailSender = sendMail,
 ): Promise<boolean> {
     const settings = await getSettings();
@@ -34,8 +34,8 @@ export async function notifyBackupFailed(
     const config = await getMailConfig(settings);
     if (!config) return false;
 
-    const backup = await prisma.backup.findUnique({
-        where: { id: backupId },
+    const backup = await prisma.job.findUnique({
+        where: { id: jobId },
         include: { site: { select: { id: true, domain: true } } },
     });
     if (!backup || backup.status !== 'error') return false;
@@ -45,7 +45,7 @@ export async function notifyBackupFailed(
         failureMail({
             domain: backup.site.domain,
             siteId: backup.site.id,
-            backupId: backup.id,
+            jobId: backup.id,
             triggerType: backup.triggerType,
             startedAt: backup.startedAt,
             finishedAt: backup.finishedAt,
@@ -56,7 +56,7 @@ export async function notifyBackupFailed(
             timeZone: process.env.TZ || undefined,
         }),
     );
-    logResult(`backup ${backupId}`, result);
+    logResult(`backup ${jobId}`, result);
     return true;
 }
 

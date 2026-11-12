@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { apiHandler, jsonError, parseBody } from '@/lib/api';
-import { deleteSite, getSite, isUniqueViolation, listBackups, updateSite } from '@/lib/db';
+import { deleteSite, getSite, isUniqueViolation, listJobs, updateSite } from '@/lib/db';
 import * as scheduler from '@/lib/jobs/scheduler';
 import { requireRole } from '@/lib/session';
-import { backupsQuerySchema, parseId, siteUpdateSchema } from '@/lib/validation';
+import { jobsQuerySchema, parseId, siteUpdateSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +14,7 @@ export const GET = apiHandler(async (request: Request, { params }: Params) => {
     const site = id ? await getSite(id) : null;
     if (!site) return jsonError(404, 'Site not found');
 
-    const backups = await listBackups(backupsQuerySchema.parse({ siteId: site.id, pageSize: 20 }));
+    const backups = await listJobs(jobsQuerySchema.parse({ siteId: site.id, pageSize: 20 }));
     return NextResponse.json({ site, backups: backups.items });
 });
 

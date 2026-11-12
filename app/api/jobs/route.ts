@@ -1,18 +1,18 @@
 import { NextResponse } from 'next/server';
 import { apiHandler, jsonError, parseBody, validationError } from '@/lib/api';
-import { getSite, listBackups, listSites, type SiteSummary } from '@/lib/db';
-import { BackupConflictError, enqueue } from '@/lib/jobs/queue';
+import { getSite, listJobs, listSites, type SiteSummary } from '@/lib/db';
+import { JobConflictError, enqueue } from '@/lib/jobs/queue';
 import { requireRole } from '@/lib/session';
-import { backupsQuerySchema, runBackupSchema } from '@/lib/validation';
+import { jobsQuerySchema, runBackupSchema } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 
-/** Paginated history: `?siteId=&status=&page=&pageSize=`. Rows carry no log, see `GET /api/backups/[id]`. */
+/** Paginated history: `?siteId=&status=&page=&pageSize=`. Rows carry no log, see `GET /api/jobs/[id]`. */
 export const GET = apiHandler(async (request: Request) => {
     const query = Object.fromEntries(new URL(request.url).searchParams);
-    const parsed = backupsQuerySchema.safeParse(query);
+    const parsed = jobsQuerySchema.safeParse(query);
     if (!parsed.success) return validationError(parsed.error);
-    return NextResponse.json(await listBackups(parsed.data));
+    return NextResponse.json(await listJobs(parsed.data));
 });
 
 /** Queues one backup per site: the given `siteIds`, or every enabled site. Sites with an active backup are reported in `conflicts`; 409 when nothing could be queued. */
@@ -34,17 +34,17 @@ export const POST = apiHandler(async (request: Request) => {
         if (sites.length === 0) return jsonError(400, 'No enabled sites');
     }
 
-    const queued: { backupId: number; siteId: number; domain: string }[] = [];
+    const queued: { jobId: number; siteId: number; domain: string }[] = [];
     const conflicts: { siteId: number; domain: string }[] = [];
     for (const site of sites) {
         try {
-            const backupId = await enqueue(site.id, {
+            const jobId = await enqueue(site.id, {
                 fullDownload: data.fullDownload,
                 skipGit: data.skipGit,
             });
-            queued.push({ backupId, siteId: site.id, domain: site.domain });
+            queued.push({ jobId, siteId: site.id, domain: site.domain });
         } catch (error) {
-            if (!(error instanceof BackupConflictError)) throw error;
+            if (!(error instanceof JobConflictError)) throw error;
             conflicts.push({ siteId: site.id, domain: site.domain });
         }
     }

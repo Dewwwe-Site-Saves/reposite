@@ -42,7 +42,7 @@ async function createBackup(status: string): Promise<number> {
             passwordEnc: encrypt('secret'),
         },
     });
-    const backup = await prisma.backup.create({
+    const backup = await prisma.job.create({
         data: {
             siteId: site.id,
             status,
@@ -60,7 +60,7 @@ async function createBackup(status: string): Promise<number> {
 
 beforeEach(async () => {
     sent.length = 0;
-    await prisma.backup.deleteMany();
+    await prisma.job.deleteMany();
     await prisma.settings.upsert({ where: { id: 1 }, update: SMTP, create: { id: 1, ...SMTP } });
     process.env.APP_URL = 'https://backups.example.com/';
 });
@@ -127,8 +127,8 @@ describe('start', () => {
         const failed = await createBackup('error');
         const ok = await createBackup('success');
 
-        queue.events.emit('done', { backupId: ok, status: 'success' });
-        queue.events.emit('done', { backupId: failed, status: 'error' });
+        queue.events.emit('done', { jobId: ok, status: 'success' });
+        queue.events.emit('done', { jobId: failed, status: 'error' });
         await vi.waitFor(() => expect(sent).toHaveLength(1));
         expect(sent[0]!.mail.subject).toBe('[Reposite] Backup failed: site.test');
 
