@@ -93,6 +93,8 @@ export const siteCreateSchema = z.object({
         .transform((value) => value || null),
     cronSchedule: cronSchema.nullable().default(null),
     enabled: z.boolean().default(true),
+    inventoryCronSchedule: cronSchema.nullable().default(null),
+    inventoryEnabled: z.boolean().default(true),
 });
 
 /** Same as create, but an empty or missing password keeps the stored one. */
@@ -164,12 +166,15 @@ export const settingsSchema = z
         defaultCron: cronSchema,
         concurrency: z.number().int().min(1).max(5),
         retentionDays: z.number().int().min(1).max(3650),
+        defaultInventoryCron: cronSchema,
+        inventoryRetentionDays: z.number().int().min(1).max(3650),
         notifyOnError: z.boolean().default(false),
+        notifyOnInventoryError: z.boolean().default(false),
         ...smtpFields,
     })
     .superRefine((data, ctx) => {
         // Notifications can only be switched on with a complete SMTP block: a silent misconfiguration would defeat the point.
-        if (!data.notifyOnError) return;
+        if (!data.notifyOnError && !data.notifyOnInventoryError) return;
         const missing = (['smtpHost', 'smtpFrom', 'notifyTo'] as const).filter((key) => !data[key]);
         for (const key of missing) {
             ctx.addIssue({

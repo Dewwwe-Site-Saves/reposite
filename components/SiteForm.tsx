@@ -25,12 +25,14 @@ interface SiteFormValues {
     spListItemId: string;
     cronSchedule: string;
     enabled: boolean;
+    inventoryCronSchedule: string;
+    inventoryEnabled: boolean;
 }
 
 const SELECT_CLASS =
     'flex h-7 w-full rounded-md border border-input bg-input/20 px-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 dark:bg-input/30 md:text-xs/relaxed';
 
-function defaults(defaultCron: string): SiteFormValues {
+function defaults(defaultCron: string, defaultInventoryCron: string): SiteFormValues {
     return {
         domain: '',
         repo: '',
@@ -44,10 +46,16 @@ function defaults(defaultCron: string): SiteFormValues {
         spListItemId: '',
         cronSchedule: defaultCron,
         enabled: true,
+        inventoryCronSchedule: defaultInventoryCron,
+        inventoryEnabled: true,
     };
 }
 
-function toFormValues(site: SiteSummary, defaultCron: string): SiteFormValues {
+function toFormValues(
+    site: SiteSummary,
+    defaultCron: string,
+    defaultInventoryCron: string,
+): SiteFormValues {
     return {
         domain: site.domain,
         repo: site.repo,
@@ -61,6 +69,8 @@ function toFormValues(site: SiteSummary, defaultCron: string): SiteFormValues {
         spListItemId: site.spListItemId ?? '',
         cronSchedule: site.cronSchedule ?? defaultCron,
         enabled: site.enabled,
+        inventoryCronSchedule: site.inventoryCronSchedule ?? defaultInventoryCron,
+        inventoryEnabled: site.inventoryEnabled,
     };
 }
 
@@ -68,17 +78,25 @@ export function SiteForm({
     site,
     mode = 'create',
     defaultCron,
+    defaultInventoryCron,
 }: {
     site?: SiteSummary;
     mode?: 'create' | 'edit';
     /** `Settings.defaultCron`, what "Use global schedule" means today. */
     defaultCron: string;
+    /** `Settings.defaultInventoryCron`, the same for the inventory. */
+    defaultInventoryCron: string;
 }) {
     const router = useRouter();
     const [form, setForm] = useState<SiteFormValues>(
-        site ? toFormValues(site, defaultCron) : defaults(defaultCron),
+        site
+            ? toFormValues(site, defaultCron, defaultInventoryCron)
+            : defaults(defaultCron, defaultInventoryCron),
     );
     const [useGlobalSchedule, setUseGlobalSchedule] = useState(!site?.cronSchedule);
+    const [useGlobalInventorySchedule, setUseGlobalInventorySchedule] = useState(
+        !site?.inventoryCronSchedule,
+    );
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [testing, setTesting] = useState(false);
@@ -105,6 +123,7 @@ export function SiteForm({
             ...form,
             spListItemId: form.spListItemId || null,
             cronSchedule: useGlobalSchedule ? null : form.cronSchedule,
+            inventoryCronSchedule: useGlobalInventorySchedule ? null : form.inventoryCronSchedule,
         };
 
         try {
@@ -372,9 +391,9 @@ export function SiteForm({
 
                         <div className="flex items-center justify-between pt-2">
                             <div>
-                                <Label>Enabled</Label>
+                                <Label>Scheduled backups</Label>
                                 <p className="text-sm text-muted-foreground">
-                                    Disabled sites are skipped during scheduled backups
+                                    When off, the site is only backed up by hand
                                 </p>
                             </div>
                             <Switch
@@ -382,6 +401,67 @@ export function SiteForm({
                                 onCheckedChange={(checked) => update('enabled', checked)}
                             />
                         </div>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="text-base">Inventory</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <Label>Read the versions</Label>
+                                <p className="text-sm text-muted-foreground">
+                                    CMS, plugins and themes: at each backup from the synced files,
+                                    and on the schedule below from the live site
+                                </p>
+                            </div>
+                            <Switch
+                                aria-label="Inventory"
+                                checked={form.inventoryEnabled}
+                                onCheckedChange={(checked) => update('inventoryEnabled', checked)}
+                            />
+                        </div>
+                        {form.inventoryEnabled && (
+                            <div className="flex items-center justify-between pt-2">
+                                <div>
+                                    <Label>Inventory schedule</Label>
+                                    <p className="text-sm text-muted-foreground">
+                                        Use the global schedule (
+                                        <span className="font-mono text-xs">
+                                            {defaultInventoryCron}
+                                        </span>
+                                        ) or set a custom one
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-2 text-sm">
+                                    <span>Global</span>
+                                    <Switch
+                                        aria-label="Custom inventory schedule"
+                                        checked={!useGlobalInventorySchedule}
+                                        onCheckedChange={(checked) =>
+                                            setUseGlobalInventorySchedule(!checked)
+                                        }
+                                    />
+                                    <span>Custom</span>
+                                </div>
+                            </div>
+                        )}
+                        {form.inventoryEnabled && !useGlobalInventorySchedule && (
+                            <div className="space-y-2">
+                                <Label htmlFor="inventoryCronSchedule">Cron expression</Label>
+                                <Input
+                                    id="inventoryCronSchedule"
+                                    value={form.inventoryCronSchedule}
+                                    onChange={(e) =>
+                                        update('inventoryCronSchedule', e.target.value)
+                                    }
+                                    placeholder={defaultInventoryCron}
+                                    className="font-mono"
+                                />
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
 

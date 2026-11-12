@@ -18,7 +18,9 @@ export function SidebarStatus() {
             className="block rounded-md bg-background p-3 no-underline transition-opacity hover:opacity-80"
         >
             <div className="flex items-center justify-between gap-2">
-                <span className="text-xs">ACTIVE BACKUP</span>
+                <span className="text-xs">
+                    {current.kind === 'inventory' ? 'ACTIVE INVENTORY' : 'ACTIVE BACKUP'}
+                </span>
                 <span className="relative flex size-2 shrink-0">
                     <span className="absolute inset-0 animate-ping rounded-full bg-primary opacity-75" />
                     <span className="relative size-2 rounded-full bg-primary" />

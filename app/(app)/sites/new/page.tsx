@@ -8,12 +8,16 @@ export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'Add site' };
 
 export default async function NewSitePage() {
-    const { defaultCron } = await getSettings();
+    const { defaultCron, defaultInventoryCron } = await getSettings();
 
     return (
         <div className="max-w-3xl space-y-6">
             <PageHeader title="Add site" />
-            <SiteForm mode="create" defaultCron={defaultCron} />
+            <SiteForm
+                mode="create"
+                defaultCron={defaultCron}
+                defaultInventoryCron={defaultInventoryCron}
+            />
         </div>
     );
 }

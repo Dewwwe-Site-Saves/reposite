@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { Prisma } from './generated/prisma/client';
-import type { Job, Settings, Site, User } from './generated/prisma/client';
+import type { Job, Settings, Site, SiteComponent, User } from './generated/prisma/client';
 import type { Role } from './auth';
 import { decrypt, encrypt } from './crypto';
 import { DEFAULT_AUTHOR_NAME } from './engine/git';
@@ -244,6 +244,27 @@ export async function saveInventory(
             data: inventory.components.map((component) => ({ siteId, ...component })),
         }),
     ]);
+}
+
+/** The components of the last complete inventory, by type then slug. */
+export function listSiteComponents(siteId: number): Promise<SiteComponent[]> {
+    return prisma.siteComponent.findMany({
+        where: { siteId },
+        orderBy: [{ type: 'asc' }, { slug: 'asc' }],
+    });
+}
+
+export function countSiteComponents(siteId: number): Promise<number> {
+    return prisma.siteComponent.count({ where: { siteId } });
+}
+
+/** The most recent inventory run of a site, finished or not, without its log. A backup that read the inventory on its way is not one. */
+export function getLastInventoryJob(siteId: number): Promise<JobRow | null> {
+    return prisma.job.findFirst({
+        where: { siteId, kind: 'inventory' },
+        orderBy: { id: 'desc' },
+        omit: { log: true },
+    });
 }
 
 // ============ Settings ============

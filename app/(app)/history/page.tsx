@@ -43,16 +43,18 @@ export default async function HistoryPage({
 }) {
     const query = parseQuery(await searchParams);
     const [backups, sites] = await Promise.all([listJobs(query), listSites()]);
-    const filtered = query.siteId !== undefined || query.status !== undefined;
+    const filtered =
+        query.kind !== 'backup' || query.siteId !== undefined || query.status !== undefined;
 
     return (
         <div className="space-y-6">
             <PageHeader
                 title="History"
-                subtitle="Backup execution history"
+                subtitle="Backups by default; inventory runs are one filter away"
                 action={
                     <HistoryFilters
                         sites={sites.map((site) => ({ id: site.id, domain: site.domain }))}
+                        kind={query.kind}
                         siteId={query.siteId}
                         status={query.status}
                     />
@@ -65,7 +67,7 @@ export default async function HistoryPage({
                         <div className="text-center py-16 text-muted-foreground">
                             <p>
                                 {filtered
-                                    ? 'No backups match these filters.'
+                                    ? 'No run matches these filters.'
                                     : 'No backups have been run yet.'}
                             </p>
                         </div>
@@ -73,6 +75,7 @@ export default async function HistoryPage({
                         <BackupHistory
                             backups={backups.items}
                             showDomain={true}
+                            kindFilter={query.kind}
                             siteId={query.siteId}
                             statusFilter={query.status}
                         />

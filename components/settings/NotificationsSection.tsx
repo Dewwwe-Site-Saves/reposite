@@ -119,6 +119,13 @@ export function NotificationsSection({ settings }: { settings: SettingsView }) {
                     checked={form.notifyOnError}
                     onCheckedChange={(checked) => update('notifyOnError', checked)}
                 />
+                <ToggleRow
+                    id="notifyOnInventoryError"
+                    title="Inventory Alerts"
+                    description="Send one email when the inventory of a site starts failing, and none for the following failures until it succeeds again."
+                    checked={form.notifyOnInventoryError}
+                    onCheckedChange={(checked) => update('notifyOnInventoryError', checked)}
+                />
 
                 {/* Host, port and protocol keep the widths of the design: 413 / 180 / 219 of 876. */}
                 <div className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-[413fr_180fr_219fr]">

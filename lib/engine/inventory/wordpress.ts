@@ -10,7 +10,6 @@ const HEADER_CHARS = 8192;
  */
 export const wordpress: CmsAdapter = {
     id: 'wordpress',
-    label: 'WordPress',
 
     detect: (rootEntries) => hasDir(rootEntries, 'wp-includes'),
 

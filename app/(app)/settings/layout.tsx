@@ -23,9 +23,10 @@ function navStatus(settings: SettingsView): SettingsNavStatus {
                 ? { text: 'Connected', tone: 'on' }
                 : { text: 'Not set', tone: 'off' },
         sharepoint: sharepoint ? { text: 'On', tone: 'on' } : { text: 'Off', tone: 'off' },
-        notifications: settings.notifyOnError
-            ? { text: 'On', tone: 'on' }
-            : { text: 'Off', tone: 'off' },
+        notifications:
+            settings.notifyOnError || settings.notifyOnInventoryError
+                ? { text: 'On', tone: 'on' }
+                : { text: 'Off', tone: 'off' },
     };
 }
 

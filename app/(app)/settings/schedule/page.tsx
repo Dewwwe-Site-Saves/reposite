@@ -14,6 +14,7 @@ export default async function Page() {
         <ScheduleSection
             settings={toSettingsView(settings)}
             summary={describeCron(settings.defaultCron)}
+            inventorySummary={describeCron(settings.defaultInventoryCron)}
         />
     );
 }

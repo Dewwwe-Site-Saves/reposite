@@ -20,7 +20,10 @@ export interface SettingsFormValues {
     defaultCron: string;
     concurrency: string;
     retentionDays: string;
+    defaultInventoryCron: string;
+    inventoryRetentionDays: string;
     notifyOnError: boolean;
+    notifyOnInventoryError: boolean;
     notifyTo: string;
     smtpHost: string;
     smtpPort: string;
@@ -45,7 +48,10 @@ export function toFormValues(settings: SettingsView): SettingsFormValues {
         defaultCron: settings.defaultCron,
         concurrency: String(settings.concurrency),
         retentionDays: String(settings.retentionDays),
+        defaultInventoryCron: settings.defaultInventoryCron,
+        inventoryRetentionDays: String(settings.inventoryRetentionDays),
         notifyOnError: settings.notifyOnError,
+        notifyOnInventoryError: settings.notifyOnInventoryError,
         notifyTo: settings.notifyTo ?? '',
         smtpHost: settings.smtpHost ?? '',
         smtpPort: String(settings.smtpPort),
@@ -112,6 +118,7 @@ export function useSettingsSection(settings: SettingsView): SettingsSectionForm 
                     ...smtpBody(form),
                     concurrency: Number(form.concurrency),
                     retentionDays: Number(form.retentionDays),
+                    inventoryRetentionDays: Number(form.inventoryRetentionDays),
                 }),
             });
             const data = await res.json().catch(() => ({}));

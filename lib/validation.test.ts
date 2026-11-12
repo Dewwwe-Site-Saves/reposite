@@ -154,13 +154,29 @@ describe('recipientsSchema', () => {
 });
 
 describe('settingsSchema', () => {
-    const base = { defaultCron: '0 2 * * *', concurrency: 2, retentionDays: 90 };
+    const base = {
+        defaultCron: '0 2 * * *',
+        concurrency: 2,
+        retentionDays: 90,
+        defaultInventoryCron: '0 4 * * *',
+        inventoryRetentionDays: 14,
+    };
 
     it('refuses to enable notifications without host, sender and recipients', () => {
         const result = settingsSchema.safeParse({ ...base, notifyOnError: true });
         expect(result.success).toBe(false);
         const paths = result.error?.issues.map((issue) => issue.path.join('.')).sort();
         expect(paths).toEqual(['notifyTo', 'smtpFrom', 'smtpHost']);
+    });
+
+    it('asks for the same SMTP block when only the inventory alerts are switched on', () => {
+        const result = settingsSchema.safeParse({ ...base, notifyOnInventoryError: true });
+        expect(result.success).toBe(false);
+        expect(result.error?.issues.map((issue) => issue.path.join('.')).sort()).toEqual([
+            'notifyTo',
+            'smtpFrom',
+            'smtpHost',
+        ]);
     });
 
     it('accepts an incomplete SMTP block while notifications are off', () => {

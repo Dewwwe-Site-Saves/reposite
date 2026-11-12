@@ -1,6 +1,6 @@
 'use client';
 
-import { Time04Icon } from '@hugeicons/core-free-icons';
+import { Layers01Icon, PackageIcon, Time04Icon } from '@hugeicons/core-free-icons';
 import { Field } from '@/components/settings/Field';
 import { FormError } from '@/components/settings/FormError';
 import { SettingsSection } from '@/components/settings/SettingsSection';
@@ -10,13 +10,15 @@ import { useSettingsSection } from '@/components/settings/useSettingsSection';
 import type { CronSummary } from '@/lib/cron';
 import type { SettingsView } from '@/lib/db';
 
-/** `summary` describes the schedule currently in effect, so it only moves once the form is saved. */
+/** `summary` and `inventorySummary` describe the schedules currently in effect, so they only move once the form is saved. */
 export function ScheduleSection({
     settings,
     summary,
+    inventorySummary,
 }: {
     settings: SettingsView;
     summary: CronSummary;
+    inventorySummary: CronSummary;
 }) {
     const { form, update, dirty, saving, error, discard, submit } = useSettingsSection(settings);
 
@@ -26,8 +28,8 @@ export function ScheduleSection({
 
             <SettingsSection
                 icon={Time04Icon}
-                title="Schedule & Queue"
-                description="When the sites without a schedule of their own are backed up, how many runs share the machine, and how long the history is kept."
+                title="Backup schedule"
+                description="When the sites without a schedule of their own are backed up, and how long their backups stay in the history."
             >
                 <SummaryBar
                     items={[
@@ -46,24 +48,13 @@ export function ScheduleSection({
                         onChange={(e) => update('defaultCron', e.target.value)}
                     />
                     <Field
-                        id="concurrency"
-                        label="Concurrent backups"
-                        type="number"
-                        min={1}
-                        max={5}
-                        required
-                        hint="1 to 5."
-                        value={form.concurrency}
-                        onChange={(e) => update('concurrency', e.target.value)}
-                    />
-                    <Field
                         id="retentionDays"
                         label="Retention in days"
                         type="number"
                         min={1}
                         max={3650}
                         required
-                        hint="The last 5 runs of each site are always kept."
+                        hint="The last 5 backups of each site are always kept."
                         value={form.retentionDays}
                         onChange={(e) => update('retentionDays', e.target.value)}
                     />
@@ -72,12 +63,67 @@ export function ScheduleSection({
                 <CronHelp />
             </SettingsSection>
 
+            <SettingsSection
+                icon={PackageIcon}
+                title="Inventory schedule"
+                description="When the sites without an inventory schedule of their own have their CMS, plugin and theme versions read from the live site, and how long those runs stay in the history. Every backup reads them too, from the files it has just synced."
+            >
+                <SummaryBar
+                    items={[
+                        { label: 'Rule', value: inventorySummary.rule },
+                        { label: 'Next', value: inventorySummary.next ?? 'never' },
+                    ]}
+                />
+
+                <div className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-3">
+                    <Field
+                        id="defaultInventoryCron"
+                        label="Cron expression"
+                        className="font-mono"
+                        required
+                        value={form.defaultInventoryCron}
+                        onChange={(e) => update('defaultInventoryCron', e.target.value)}
+                    />
+                    <Field
+                        id="inventoryRetentionDays"
+                        label="Retention in days"
+                        type="number"
+                        min={1}
+                        max={3650}
+                        required
+                        hint="The last 5 inventory runs of each site are always kept."
+                        value={form.inventoryRetentionDays}
+                        onChange={(e) => update('inventoryRetentionDays', e.target.value)}
+                    />
+                </div>
+            </SettingsSection>
+
+            <SettingsSection
+                icon={Layers01Icon}
+                title="Queue"
+                description="How many jobs run at the same time, backups and inventories together. A site never has more than one job at once, whatever this number."
+            >
+                <div className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-3">
+                    <Field
+                        id="concurrency"
+                        label="Concurrent jobs"
+                        type="number"
+                        min={1}
+                        max={5}
+                        required
+                        hint="1 to 5."
+                        value={form.concurrency}
+                        onChange={(e) => update('concurrency', e.target.value)}
+                    />
+                </div>
+            </SettingsSection>
+
             {dirty && <UnsavedBar onDiscard={discard} saving={saving} />}
         </form>
     );
 }
 
-/** The expression governs every site without its own schedule, so it is worth explaining in place. */
+/** Both default expressions govern every site without a schedule of its own, so the syntax is worth explaining in place, once. */
 function CronHelp() {
     return (
         <div className="space-y-1.5 rounded-md border border-border p-3 text-xs text-muted-foreground">

@@ -14,12 +14,17 @@ export default async function EditSitePage({ params }: { params: Promise<{ id: s
     const site = id ? await getSite(id) : null;
     if (!site) notFound();
 
-    const { defaultCron } = await getSettings();
+    const { defaultCron, defaultInventoryCron } = await getSettings();
 
     return (
         <div className="max-w-3xl space-y-6">
             <PageHeader title={`Edit — ${site.domain}`} />
-            <SiteForm site={site} mode="edit" defaultCron={defaultCron} />
+            <SiteForm
+                site={site}
+                mode="edit"
+                defaultCron={defaultCron}
+                defaultInventoryCron={defaultInventoryCron}
+            />
         </div>
     );
 }

@@ -3,6 +3,9 @@ import type { LogEntry, RunOutcome } from '../types';
 /** CMS the inventory knows how to read, one adapter each. */
 export type CmsId = 'wordpress';
 
+/** Product names, for the log and the interface. */
+export const CMS_LABELS: Record<CmsId, string> = { wordpress: 'WordPress' };
+
 export type ComponentType = 'plugin' | 'mu-plugin' | 'theme';
 
 export interface Component {
@@ -40,8 +43,6 @@ export interface InventoryReader {
 
 export interface CmsAdapter {
     id: CmsId;
-    /** Product name, for the log. */
-    label: string;
     /** Decides from the entries of the web root alone. */
     detect(rootEntries: readonly InventoryEntry[]): boolean;
     read(reader: InventoryReader): Promise<Omit<Inventory, 'cms'>>;

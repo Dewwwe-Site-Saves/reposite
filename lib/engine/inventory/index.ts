@@ -3,6 +3,7 @@ import { createLogger } from '../logger';
 import { createRemoteFactory, openClient, remoteRootDir } from '../remote';
 import type { Logger, RunOutcome, SiteConfig } from '../types';
 import { createRemoteReader } from './reader';
+import { CMS_LABELS } from './types';
 import type {
     CmsAdapter,
     Component,
@@ -14,7 +15,7 @@ import type {
 import { wordpress } from './wordpress';
 
 export { createLocalReader, createRemoteReader } from './reader';
-export type * from './types';
+export * from './types';
 
 /** Tried in order, the first whose `detect` accepts the web root reads the site. */
 const ADAPTERS: readonly CmsAdapter[] = [wordpress];
@@ -32,10 +33,11 @@ export async function readInventory(
     const rootEntries = await reader.list('');
     const adapter = ADAPTERS.find((candidate) => candidate.detect(rootEntries));
     if (!adapter) throw new Error(`No supported CMS found in ${where}`);
-    log.info(`${adapter.label} detected in ${where}`);
+    const label = CMS_LABELS[adapter.id];
+    log.info(`${label} detected in ${where}`);
 
     const { version, components } = await adapter.read(reader);
-    log.info(`${adapter.label} ${version}, ${describeComponents(components)}`);
+    log.info(`${label} ${version}, ${describeComponents(components)}`);
     return { cms: adapter.id, version, components: sortComponents(components) };
 }
 

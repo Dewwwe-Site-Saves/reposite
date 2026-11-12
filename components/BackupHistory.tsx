@@ -14,6 +14,7 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
+import type { JobKind } from '@/lib/constants';
 import type { JobWithDomain } from '@/lib/db';
 import { formatDuration, formatSize, optionLabels } from '@/lib/format';
 
@@ -26,11 +27,14 @@ type ModalState =
 export function BackupHistory({
     backups,
     showDomain = true,
+    kindFilter = 'backup',
     siteId,
     statusFilter,
 }: {
     backups: JobWithDomain[];
     showDomain?: boolean;
+    /** Only active jobs of this kind are added as extra rows, backups unless the list shows something else. */
+    kindFilter?: JobKind | 'all';
     /** Only this site's active backups are added as extra rows. */
     siteId?: number;
     /** Only active backups in this status are added as extra rows. */
@@ -59,6 +63,7 @@ export function BackupHistory({
     const extraRows = active.filter(
         (j) =>
             !knownIds.has(j.id) &&
+            (kindFilter === 'all' || j.kind === kindFilter) &&
             (siteId === undefined || j.siteId === siteId) &&
             (statusFilter === undefined || j.status === statusFilter),
     );
@@ -103,8 +108,12 @@ export function BackupHistory({
                                 <TableCell className="hidden sm:table-cell text-muted-foreground">
                                     -
                                 </TableCell>
-                                <TableCell className="hidden lg:table-cell text-muted-foreground">
-                                    -
+                                <TableCell className="hidden lg:table-cell">
+                                    <OptionsCell
+                                        kind={job.kind}
+                                        fullDownload={false}
+                                        skipGit={false}
+                                    />
                                 </TableCell>
                                 <TableCell className="hidden sm:table-cell text-muted-foreground">
                                     -
@@ -137,6 +146,7 @@ export function BackupHistory({
                                 </TableCell>
                                 <TableCell className="hidden lg:table-cell">
                                     <OptionsCell
+                                        kind={backup.kind}
                                         fullDownload={backup.fullDownload}
                                         skipGit={backup.skipGit}
                                     />
@@ -213,8 +223,20 @@ export function BackupHistory({
     );
 }
 
-function OptionsCell({ fullDownload, skipGit }: { fullDownload: boolean; skipGit: boolean }) {
-    const labels = optionLabels(fullDownload, skipGit);
+/** The run options, and what the run was when it was not a backup. */
+function OptionsCell({
+    kind,
+    fullDownload,
+    skipGit,
+}: {
+    kind: string;
+    fullDownload: boolean;
+    skipGit: boolean;
+}) {
+    const labels = [
+        ...(kind === 'inventory' ? ['Inventory'] : []),
+        ...optionLabels(fullDownload, skipGit),
+    ];
     if (labels.length === 0) return <span className="text-muted-foreground">-</span>;
     return (
         <div className="flex gap-1">
