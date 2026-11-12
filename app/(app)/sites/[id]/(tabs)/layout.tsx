@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import { RunBackupButton } from '@/components/BackupActions';
 import { PageHeader } from '@/components/PageHeader';
-import { SiteTabs } from '@/components/SiteTabs';
+import { RouteTabs } from '@/components/RouteTabs';
 import { Badge } from '@/components/ui/badge';
 import { countSiteComponents, getSite } from '@/lib/db';
 import { cmsLabel } from '@/lib/format';
@@ -48,7 +48,17 @@ export default async function SiteLayout({
                     </div>
                 }
             />
-            <SiteTabs siteId={site.id} componentCount={componentCount} />
+            <RouteTabs
+                label="Site sections"
+                tabs={[
+                    { href: `/sites/${site.id}`, label: 'Overview' },
+                    {
+                        href: `/sites/${site.id}/inventory`,
+                        label: 'Inventory',
+                        count: componentCount,
+                    },
+                ]}
+            />
             {children}
         </div>
     );

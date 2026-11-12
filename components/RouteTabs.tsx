@@ -3,17 +3,19 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-/** The tabs of a site page, one route each like the settings sections. Only the tabs that have content exist. */
-export function SiteTabs({ siteId, componentCount }: { siteId: number; componentCount: number }) {
+export interface RouteTab {
+    href: string;
+    label: string;
+    /** Shown next to the label when above zero. */
+    count?: number;
+}
+
+/** Tabs that are routes, like the settings sections: the layout of a group of pages renders them once. */
+export function RouteTabs({ tabs, label }: { tabs: RouteTab[]; label: string }) {
     const pathname = usePathname();
-    const base = `/sites/${siteId}`;
-    const tabs: { href: string; label: string; count?: number }[] = [
-        { href: base, label: 'Overview' },
-        { href: `${base}/inventory`, label: 'Inventory', count: componentCount },
-    ];
 
     return (
-        <nav className="flex gap-1" aria-label="Site sections">
+        <nav className="flex gap-1" aria-label={label}>
             {tabs.map((tab) => {
                 const current = pathname === tab.href;
                 return (

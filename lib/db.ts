@@ -267,6 +267,51 @@ export function getLastInventoryJob(siteId: number): Promise<JobRow | null> {
     });
 }
 
+/** A site with what its last inventory found, for the cross-site view. */
+export interface SiteInventory {
+    id: number;
+    domain: string;
+    cms: string | null;
+    cmsVersion: string | null;
+    inventoryAt: Date | null;
+    inventoryEnabled: boolean;
+    /** Number of components per type, absent types included as zero by the reader. */
+    counts: Record<string, number>;
+}
+
+export async function listSiteInventories(): Promise<SiteInventory[]> {
+    const sites = await prisma.site.findMany({
+        select: {
+            id: true,
+            domain: true,
+            cms: true,
+            cmsVersion: true,
+            inventoryAt: true,
+            inventoryEnabled: true,
+            components: { select: { type: true } },
+        },
+        orderBy: { domain: 'asc' },
+    });
+    return sites.map(({ components, ...site }) => {
+        const counts: Record<string, number> = {};
+        for (const { type } of components) counts[type] = (counts[type] ?? 0) + 1;
+        return { ...site, counts };
+    });
+}
+
+/** Every component of every site, with the site it is installed on. */
+export function listInstalledComponents() {
+    return prisma.siteComponent.findMany({
+        select: {
+            type: true,
+            slug: true,
+            name: true,
+            version: true,
+            site: { select: { id: true, domain: true } },
+        },
+    });
+}
+
 // ============ Settings ============
 
 /** The singleton row, created with defaults on first access. A plain read afterwards: `upsert` would take a write transaction on every call. */

@@ -7,6 +7,7 @@ import {
     Clock01Icon,
     DashboardSquare01Icon,
     GlobeIcon,
+    PackageIcon,
     Settings01Icon,
 } from '@hugeicons/core-free-icons';
 import { SidebarStatus } from '@/components/SidebarStatus';
@@ -20,6 +21,7 @@ export interface SidebarUser {
 const LINKS = [
     { href: '/', label: 'Dashboard', icon: DashboardSquare01Icon },
     { href: '/sites', label: 'Sites', icon: GlobeIcon },
+    { href: '/inventory', label: 'Inventory', icon: PackageIcon },
     { href: '/history', label: 'History', icon: Clock01Icon },
     { href: '/settings', label: 'Settings', icon: Settings01Icon },
 ];

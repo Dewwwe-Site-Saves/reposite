@@ -51,3 +51,48 @@ export function RunInventoryButton({ siteId }: { siteId: number }) {
         </div>
     );
 }
+
+/** Queues an inventory of every site that has it switched on. Disabled while anything is active, like its backup counterpart. */
+export function RunAllInventoriesButton() {
+    const { active, refresh } = useJobStatus();
+    const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    async function handleRunAll() {
+        setSubmitting(true);
+        setError(null);
+        try {
+            const res = await fetch('/api/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind: 'inventory' }),
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                setError(data.error || 'Could not queue the inventories');
+            }
+            await refresh();
+        } catch {
+            setError('Could not queue the inventories');
+        } finally {
+            setSubmitting(false);
+        }
+    }
+
+    return (
+        <div className="flex items-center gap-3">
+            {error && <span className="text-sm text-destructive">{error}</span>}
+            <Button
+                variant="outline"
+                onClick={handleRunAll}
+                disabled={submitting || active.length > 0}
+            >
+                {active.length > 0
+                    ? 'Running...'
+                    : submitting
+                      ? 'Queuing...'
+                      : 'Run all inventories'}
+            </Button>
+        </div>
+    );
+}
