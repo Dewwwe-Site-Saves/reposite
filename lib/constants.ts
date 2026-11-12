@@ -21,6 +21,14 @@ export const ACTIVE_STATUSES = ['pending', 'running'] as const satisfies readonl
 
 export type ActiveStatus = (typeof ACTIVE_STATUSES)[number];
 
+/** The tabs of the history, each a set of statuses: what is still going, and what did not end well, a cancellation included. */
+export const JOB_VIEWS = {
+    active: ACTIVE_STATUSES,
+    issues: ['error', 'cancelled'],
+} as const satisfies Record<string, readonly JobStatus[]>;
+
+export type JobView = keyof typeof JOB_VIEWS;
+
 export function isActive(status: string): status is ActiveStatus {
     return (ACTIVE_STATUSES as readonly string[]).includes(status);
 }

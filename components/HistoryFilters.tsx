@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { JOB_STATUSES } from '@/lib/constants';
+import type { JobView } from '@/lib/constants';
 
 const SELECT_CLASS =
     'h-7 rounded-md border border-input bg-input/20 px-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 dark:bg-input/30 md:text-xs/relaxed';
@@ -12,29 +12,28 @@ const KIND_OPTIONS = [
     ['all', 'All types'],
 ] as const;
 
-/** Type, site and status filters of the history page, kept in the URL so the server renders the matching page. Changing a filter goes back to page 1. */
+/** Type and site filters of the history page, kept in the URL so the server renders the matching page. The status is the business of the tabs, whose choice survives a filter change. Changing a filter goes back to page 1. */
 export function HistoryFilters({
     sites,
     kind,
     siteId,
-    status,
+    view,
 }: {
     sites: { id: number; domain: string }[];
-    /** `backup` is the default view and stays out of the URL. */
+    /** `backup` is the default and stays out of the URL. */
     kind: (typeof KIND_OPTIONS)[number][0];
     siteId?: number;
-    status?: string;
+    view?: JobView;
 }) {
     const router = useRouter();
 
-    function apply(next: { kind?: string; siteId?: string; status?: string }) {
+    function apply(next: { kind?: string; siteId?: string }) {
         const params = new URLSearchParams();
         const type = next.kind ?? kind;
-        if (type !== 'backup') params.set('kind', type);
         const site = next.siteId ?? (siteId ? String(siteId) : '');
-        const state = next.status ?? status ?? '';
+        if (type !== 'backup') params.set('kind', type);
         if (site) params.set('siteId', site);
-        if (state) params.set('status', state);
+        if (view) params.set('view', view);
         const query = params.toString();
         router.push(query ? `/history?${query}` : '/history');
     }
@@ -63,19 +62,6 @@ export function HistoryFilters({
                 {sites.map((site) => (
                     <option key={site.id} value={site.id}>
                         {site.domain}
-                    </option>
-                ))}
-            </select>
-            <select
-                aria-label="Status"
-                className={SELECT_CLASS}
-                value={status ?? ''}
-                onChange={(e) => apply({ status: e.target.value })}
-            >
-                <option value="">All statuses</option>
-                {JOB_STATUSES.map((value) => (
-                    <option key={value} value={value}>
-                        {value.charAt(0).toUpperCase() + value.slice(1)}
                     </option>
                 ))}
             </select>

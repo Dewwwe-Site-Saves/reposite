@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import { validate as validateCron } from 'node-cron';
-import { JOB_KINDS, JOB_STATUSES, PROTOCOLS, SECRET_MASK, SMTP_SECURITIES } from './constants';
+import {
+    JOB_KINDS,
+    JOB_STATUSES,
+    JOB_VIEWS,
+    PROTOCOLS,
+    SECRET_MASK,
+    SMTP_SECURITIES,
+} from './constants';
 
 // The constants live in `constants.ts` (browser-safe); re-exported so server code keeps one import.
 export {
@@ -13,7 +20,15 @@ export {
     TRIGGER_TYPES,
     isActive,
 } from './constants';
-export type { ActiveStatus, JobKind, JobStatus, SmtpSecurity, TriggerType } from './constants';
+export type {
+    ActiveStatus,
+    JobKind,
+    JobStatus,
+    JobView,
+    SmtpSecurity,
+    TriggerType,
+} from './constants';
+import type { JobView } from './constants';
 
 // ============ Field schemas ============
 
@@ -219,6 +234,8 @@ export const jobsQuerySchema = z.object({
     kind: z.enum([...JOB_KINDS, 'all']).default('backup'),
     siteId: z.coerce.number().int().positive().optional(),
     status: z.enum(JOB_STATUSES).optional(),
+    /** A tab of the history: `active` or `issues`, each a set of statuses. */
+    view: z.enum(Object.keys(JOB_VIEWS) as [JobView, ...JobView[]]).optional(),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });

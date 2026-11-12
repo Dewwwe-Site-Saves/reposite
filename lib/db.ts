@@ -10,10 +10,12 @@ import type { GithubConfig, Protocol, SharePointConfig, SiteConfig } from './eng
 import type { MailConfig } from './notifications/mailer';
 import { spCertDir } from './paths';
 import { prisma } from './prisma';
+import { JOB_VIEWS } from './constants';
 import { ACTIVE_STATUSES, SECRET_MASK } from './validation';
 import type {
     ActiveStatus,
     JobKind,
+    JobView,
     JobsQuery,
     SettingsInput,
     SiteCreateInput,
@@ -170,10 +172,18 @@ export interface JobPage {
     pageSize: number;
 }
 
-export async function listJobs(query: JobsQuery): Promise<JobPage> {
-    const where: Prisma.JobWhereInput = {
+/** The kind and site filters of a query, without its status or view. */
+function jobsScope(query: Pick<JobsQuery, 'kind' | 'siteId'>): Prisma.JobWhereInput {
+    return {
         ...(query.kind === 'all' ? {} : { kind: query.kind }),
         ...(query.siteId ? { siteId: query.siteId } : {}),
+    };
+}
+
+export async function listJobs(query: JobsQuery): Promise<JobPage> {
+    const where: Prisma.JobWhereInput = {
+        ...jobsScope(query),
+        ...(query.view ? { status: { in: [...JOB_VIEWS[query.view]] } } : {}),
         ...(query.status ? { status: query.status } : {}),
     };
     const [items, total] = await prisma.$transaction([
@@ -188,6 +198,22 @@ export async function listJobs(query: JobsQuery): Promise<JobPage> {
         prisma.job.count({ where }),
     ]);
     return { items, total, page: query.page, pageSize: query.pageSize };
+}
+
+/** How many jobs each tab of the history holds, under the same kind and site filters as the list. */
+export async function countJobViews(
+    query: Pick<JobsQuery, 'kind' | 'siteId'>,
+): Promise<Record<'all' | JobView, number>> {
+    const groups = await prisma.job.groupBy({
+        by: ['status'],
+        where: jobsScope(query),
+        _count: { _all: true },
+    });
+    const count = (statuses?: readonly string[]) =>
+        groups
+            .filter((group) => !statuses || statuses.includes(group.status))
+            .reduce((total, group) => total + group._count._all, 0);
+    return { all: count(), active: count(JOB_VIEWS.active), issues: count(JOB_VIEWS.issues) };
 }
 
 export function getJob(id: number): Promise<JobDetail | null> {

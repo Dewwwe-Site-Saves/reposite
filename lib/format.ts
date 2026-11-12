@@ -14,6 +14,23 @@ export function formatSize(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const RELATIVE_UNITS: [limit: number, seconds: number, unit: string][] = [
+    [3600, 60, 'minute'],
+    [86_400, 3600, 'hour'],
+    [30 * 86_400, 86_400, 'day'],
+    [365 * 86_400, 30 * 86_400, 'month'],
+    [Infinity, 365 * 86_400, 'year'],
+];
+
+/** `9 days ago`: how long before `now` a date was, in the largest unit that fits. Under a minute, and for a date in the future (two clocks that disagree), `just now`. */
+export function formatRelative(date: Date, now: Date): string {
+    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+    if (seconds < 60) return 'just now';
+    const [, size, unit] = RELATIVE_UNITS.find(([limit]) => seconds < limit)!;
+    const count = Math.floor(seconds / size);
+    return `${count} ${unit}${count === 1 ? '' : 's'} ago`;
+}
+
 /** Labels for the run options, e.g. ["Full", "No git"]. */
 export function optionLabels(fullDownload: boolean, skipGit: boolean, long = false): string[] {
     const labels: string[] = [];

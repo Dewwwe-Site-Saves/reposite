@@ -65,7 +65,7 @@ export function RunAllButton() {
         <div className="flex items-center gap-3">
             {error && <span className="text-sm text-destructive">{error}</span>}
             <Button onClick={handleRunAll} disabled={busy}>
-                {active.length > 0 ? 'Running...' : submitting ? 'Queuing...' : 'Backup All'}
+                {active.length > 0 ? 'Running...' : submitting ? 'Queuing...' : 'Back up all'}
             </Button>
         </div>
     );

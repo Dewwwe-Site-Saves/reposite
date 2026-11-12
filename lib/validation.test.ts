@@ -219,6 +219,11 @@ describe('jobsQuerySchema', () => {
         expect(jobsQuerySchema.safeParse({ kind: 'scan' }).success).toBe(false);
     });
 
+    it('accepts the tabs of the history as views', () => {
+        expect(jobsQuerySchema.parse({ view: 'issues' }).view).toBe('issues');
+        expect(jobsQuerySchema.safeParse({ view: 'done' }).success).toBe(false);
+    });
+
     it('rejects unknown statuses and oversized pages', () => {
         expect(jobsQuerySchema.safeParse({ status: 'done' }).success).toBe(false);
         expect(jobsQuerySchema.safeParse({ pageSize: '500' }).success).toBe(false);
