@@ -36,6 +36,8 @@ ENV NODE_ENV=production \
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next/static ./.next/static
+# The standalone output leaves public/ out as well: without this the sidebar logo is a 404.
+COPY --from=builder /app/public ./public
 # Migrations, CLI config (resolves DATA_DIR through lib/paths.ts), version shown by the entrypoint.
 COPY prisma ./prisma
 COPY prisma.config.ts package.json tsconfig.json ./

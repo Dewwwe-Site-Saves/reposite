@@ -8,10 +8,13 @@ import { Sidebar, type SidebarUser } from '@/components/Sidebar';
 export function AppShell({
     user,
     siteCount,
+    version,
     children,
 }: {
     user: SidebarUser;
     siteCount: number;
+    /** Version of the app, from package.json at build time. */
+    version: string;
     children: React.ReactNode;
 }) {
     const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -30,6 +33,7 @@ export function AppShell({
                 <Sidebar
                     user={user}
                     siteCount={siteCount}
+                    version={version}
                     open={sidebarOpen}
                     onClose={() => setSidebarOpen(false)}
                 />

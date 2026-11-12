@@ -3,6 +3,8 @@
  */
 
 export interface ComponentRow {
+    /** CMS of the site the component was read on. */
+    cms: string;
     type: string;
     slug: string;
     name: string;
@@ -11,6 +13,7 @@ export interface ComponentRow {
 }
 
 export interface ComponentUsage {
+    cms: string;
     type: string;
     slug: string;
     name: string;
@@ -50,12 +53,12 @@ export function newestVersion(versions: readonly (string | null)[]): string | nu
 }
 
 /**
- * One entry per component across the sites: which versions are installed, and where. A component is the same on two sites when its type and slug match; the name is the one of its newest version. Sorted by name.
+ * One entry per component across the sites: which versions are installed, and where. A component is the same on two sites when its CMS, type and slug match (a WordPress theme and a PrestaShop theme may share a slug); the name is the one of its newest version. Sorted by name.
  */
 export function groupComponents(rows: readonly ComponentRow[]): ComponentUsage[] {
     const groups = new Map<string, ComponentRow[]>();
     for (const row of rows) {
-        const key = `${row.type}\0${row.slug}`;
+        const key = `${row.cms}\0${row.type}\0${row.slug}`;
         groups.set(key, [...(groups.get(key) ?? []), row]);
     }
 
@@ -80,6 +83,7 @@ export function groupComponents(rows: readonly ComponentRow[]): ComponentUsage[]
                 ? group.find((row) => row.version === versions[0].version)!
                 : group[0];
             return {
+                cms: group[0].cms,
                 type: group[0].type,
                 slug: group[0].slug,
                 name: newest.name,

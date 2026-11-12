@@ -1,6 +1,6 @@
 # Reposite
 
-Self-hosted backup manager for WordPress websites. Downloads files via FTP/SFTP, dumps the database, and pushes everything to a GitHub repository. Web UI to manage sites, run backups, follow logs and schedule everything.
+Self-hosted backup manager for WordPress websites. Downloads files via FTP/SFTP, dumps the database, and pushes everything to a GitHub repository. Web UI to manage sites, run backups, follow logs and schedule everything. It also keeps an inventory of what runs on each site: the CMS, its plugins and themes, and their versions.
 
 ## Usage
 
@@ -46,11 +46,11 @@ Fine-grained personal access token restricted to the backup repos, with `Content
 
 ### Schedule
 
-The Schedule & queue section carries the default cron expression for the sites without one, the number of concurrent backups and the history retention. Above the fields a strip shows the rule in plain English and the next firing, both computed in the container's `TZ`; a short reminder of the cron syntax sits under them. A site can override the expression from its own form.
+The Schedule & queue section has three cards. "Backup schedule" carries the default cron expression for the sites without one and the retention of the backups in the history; "Inventory schedule" the same two for the inventory runs; "Queue" the number of jobs that run at the same time, backups and inventories together. Above each expression a strip shows the rule in plain English and the next firing, both computed in the container's `TZ`; a short reminder of the cron syntax sits under the first one. A site can override both expressions from its own form.
 
 ### Notifications
 
-The Notifications section of Settings has an SMTP block (host, port, TLS / STARTTLS / none, credentials, sender, recipients) and an "Errors" switch. When it is on, every failed run sends a mail with the error, the dates and the last lines of the log, and a restart that interrupts backups sends one mail listing them. "Send test mail" checks the block before saving. The password is stored encrypted, the switch cannot be turned on while the block is incomplete, and a mail that cannot be sent is only logged in the container output: notifications never affect a backup.
+The Notifications section of Settings has an SMTP block (host, port, TLS / STARTTLS / none, credentials, sender, recipients) and two switches. With "Failure Alerts" on, every failed backup sends a mail with the error, the dates and the last lines of the log, and a restart that interrupts backups sends one mail listing them. With "Inventory Alerts" on, a site whose inventory starts failing sends one mail, and no other until an inventory of that site succeeds again: inventories run every day. "Send test mail" checks the block before saving. The password is stored encrypted, neither switch can be turned on while the block is incomplete, and a mail that cannot be sent is only logged in the container output: notifications never affect a backup.
 
 ### SharePoint List update
 
@@ -79,9 +79,10 @@ The app runs the following steps for each site:
 4. **Database dump** — uploads `backup-wp.php` to the site, triggers it via HTTPS with the token in a header. The PHP script self-deletes after execution
 5. **Dump download & validation** — downloads the SQL file right away to `db.sql` at the root of the repo, verifies it is not empty and contains valid SQL, deletes it from the remote server
 6. **Incremental download** — scans remote files and only downloads those that changed (different size or modification date). FTP uses a pool of 5 parallel connections, SFTP 3
-7. **Git commit, tag & push** — one commit per run with a UTC tag (`YYYYMMDD-HHmmss`); nothing is committed when nothing changed
-8. **GitHub release** — one release per backup on the tag, with the run stats
-9. **SharePoint update** — updates the last backup date in the SharePoint list (optional)
+7. **Inventory** — reads the CMS, plugin and theme versions from the files just downloaded, when the site has the inventory switched on (see [Inventory](#inventory))
+8. **Git commit, tag & push** — one commit per run with a UTC tag (`YYYYMMDD-HHmmss`); nothing is committed when nothing changed
+9. **GitHub release** — one release per backup on the tag, with the run stats
+10. **SharePoint update** — updates the last backup date in the SharePoint list (optional)
 
 ## Security
 
@@ -107,16 +108,25 @@ By default, backups run in **incremental** mode:
 
 The "Full download" option clears the local tree and downloads every file again. It refuses to run when part of the remote listing failed, so a partial snapshot never replaces a complete one.
 
+## Inventory
+
+Reposite reads what runs on each site: the CMS and its version, and every plugin, module and theme with its version. WordPress and PrestaShop (8.x) are recognised, from files only: `wp-includes/version.php` and the plugin and theme headers for WordPress, `app/AppKernel.php`, the module classes and each theme's `theme.yml` for PrestaShop. Nothing is executed or written on the site. Whether a plugin or a module is active lives in the database, so everything present in the files is listed.
+
+It is read in two ways. Every backup reads it from the files it has just downloaded, without one more request to the site. An inventory run reads the same files from the live site: on its own schedule (every day at 04:00 by default, or the site's own expression), from the "Run inventory" button of a site, or from "Run all inventories". The site form has a switch for the inventory, independent from the one for the scheduled backups: a site can have one without the other, which is how a PrestaShop site is followed while its backup is not supported.
+
+An inventory is complete or it is not stored: one file that cannot be read fails the run, and the previous inventory stays. The Inventory tab of a site shows the last reading. The Inventory page compares the sites, by site or by component (which versions of a plugin are installed, and on which sites), and shows in the warning colour a version older than the newest one seen across the sites.
+
 ## Multi-site support
 
-Backups run through a queue with limited concurrency (configurable in Settings). Each site has its own log, stored with the run and streamed live in the UI. A site can't have two backups running at the same time. The History page filters by site and status; the site form has a "Test connection" button that lists the web root before saving.
+Backups and inventories run through one queue with limited concurrency (configurable in Settings). Each run has its own log, stored with it and streamed live in the UI. A site can't have two jobs running at the same time, whatever they are. The History page lists the backups, or the inventories through its type filter, and filters by site and status; the site form has a "Test connection" button that lists the web root before saving.
 
-Every enabled site is scheduled with node-cron, on its own cron expression or the global default (the 1st and the 15th at 02:00 by default), in the `TZ` timezone. Old runs are pruned daily once past the retention period; the last 5 of each site are always kept.
+Every site with scheduled backups is scheduled with node-cron, on its own cron expression or the global default (the 1st and the 15th at 02:00 by default), in the `TZ` timezone; its inventory is scheduled the same way on its own expression. Old runs are pruned daily once past their retention period, 90 days for the backups and 14 for the inventories by default; the last 5 of each kind are always kept for each site.
 
 ## Error handling
 
 - A backup never crashes the app — every run ends with a status (`success`, `error`, `cancelled`) and its log
-- SharePoint and release errors are non-blocking (backup is still considered successful)
+- SharePoint, release and inventory errors are non-blocking (backup is still considered successful)
+- A failed inventory run leaves the previous inventory of the site in place
 - Git errors are reported, the backup is marked as error
 - On dump failure, remote files (PHP, token) are cleaned up
 - Runs interrupted by a restart are marked as error at next boot
@@ -129,6 +139,12 @@ To look at what the sync would do without touching the remote or the clone:
 
 ```bash
 npx tsx scripts/smoke-sync.ts your-site.com   # scan + plan, read-only
+```
+
+To read the inventory of a site without storing anything:
+
+```bash
+npx tsx scripts/smoke-inventory.ts your-site.com   # CMS, plugins, themes and versions, read-only
 ```
 
 ## Deploy (Docker)
@@ -171,8 +187,8 @@ docker run --rm -p 3000:3000 -v "$(mktemp -d):/data" -e ENCRYPTION_KEY=$(openssl
 Versions are git tags. Pushing an annotated `vX.Y.Z` tag makes GitHub Actions build the image with that version, tag it `latest`, and create a GitHub Release whose notes list the commits since the previous tag. A tag with a suffix (`v2.1.0-beta.1`) is a pre-release.
 
 ```bash
-git tag -a v2.0.0 -m "Release v2.0.0"
-git push origin v2.0.0
+git tag -a v3.1.0 -m "v3.1.0 - Site inventory"
+git push origin v3.1.0
 ```
 
 ## Roadmap

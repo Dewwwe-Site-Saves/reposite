@@ -11,7 +11,7 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
-import { COMPONENT_TYPE_LABELS } from '@/lib/format';
+import { COMPONENT_TYPE_LABELS, cmsLabel } from '@/lib/format';
 import type { ComponentUsage } from '@/lib/inventory';
 
 const SELECT_CLASS =
@@ -21,10 +21,14 @@ const SELECT_CLASS =
 export function InventoryComponentsTable({ components }: { components: ComponentUsage[] }) {
     const [search, setSearch] = useState('');
     const [type, setType] = useState('');
+    const [cms, setCms] = useState('');
+    // Only the CMS that some site actually runs.
+    const cmsOptions = [...new Set(components.map((component) => component.cms))].sort();
 
     const needle = search.trim().toLowerCase();
     const shown = components.filter(
         (component) =>
+            (cms === '' || component.cms === cms) &&
             (type === '' || component.type === type) &&
             (needle === '' ||
                 component.name.toLowerCase().includes(needle) ||
@@ -41,6 +45,19 @@ export function InventoryComponentsTable({ components }: { components: Component
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />
+                <select
+                    aria-label="CMS"
+                    className={SELECT_CLASS}
+                    value={cms}
+                    onChange={(e) => setCms(e.target.value)}
+                >
+                    <option value="">All CMS</option>
+                    {cmsOptions.map((value) => (
+                        <option key={value} value={value}>
+                            {cmsLabel(value)}
+                        </option>
+                    ))}
+                </select>
                 <select
                     aria-label="Type"
                     className={SELECT_CLASS}
@@ -77,7 +94,7 @@ export function InventoryComponentsTable({ components }: { components: Component
                         <TableBody>
                             {shown.map((component) => (
                                 <TableRow
-                                    key={`${component.type}:${component.slug}`}
+                                    key={`${component.cms}:${component.type}:${component.slug}`}
                                     className="align-top"
                                 >
                                     <TableCell>
@@ -87,7 +104,8 @@ export function InventoryComponentsTable({ components }: { components: Component
                                         </p>
                                     </TableCell>
                                     <TableCell className="hidden text-muted-foreground sm:table-cell">
-                                        {typeLabel(component.type)}
+                                        <p>{typeLabel(component.type)}</p>
+                                        <p className="text-xs">{cmsLabel(component.cms)}</p>
                                     </TableCell>
                                     <TableCell className="text-muted-foreground">
                                         {component.siteCount}

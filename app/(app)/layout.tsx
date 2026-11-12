@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { AppShell } from '@/components/AppShell';
 import { countSites } from '@/lib/db';
 import { getCurrentUser } from '@/lib/session';
+import packageJson from '@/package.json';
 
 // Reads the database for the sidebar counter, so it cannot be prerendered.
 export const dynamic = 'force-dynamic';
@@ -12,7 +13,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (!user) redirect('/login');
 
     return (
-        <AppShell user={{ email: user.email, role: user.role }} siteCount={siteCount}>
+        <AppShell
+            user={{ email: user.email, role: user.role }}
+            siteCount={siteCount}
+            version={packageJson.version}
+        >
             {children}
         </AppShell>
     );

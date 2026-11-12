@@ -5,6 +5,7 @@ import type { Role } from './auth';
 import { decrypt, encrypt } from './crypto';
 import { DEFAULT_AUTHOR_NAME } from './engine/git';
 import type { Inventory } from './engine/inventory/types';
+import type { ComponentRow } from './inventory';
 import type { GithubConfig, Protocol, SharePointConfig, SiteConfig } from './engine/types';
 import type { MailConfig } from './notifications/mailer';
 import { spCertDir } from './paths';
@@ -299,17 +300,19 @@ export async function listSiteInventories(): Promise<SiteInventory[]> {
     });
 }
 
-/** Every component of every site, with the site it is installed on. */
-export function listInstalledComponents() {
-    return prisma.siteComponent.findMany({
+/** Every component of every site, with the site it is installed on and the CMS that site runs. */
+export async function listInstalledComponents(): Promise<ComponentRow[]> {
+    const rows = await prisma.siteComponent.findMany({
         select: {
             type: true,
             slug: true,
             name: true,
             version: true,
-            site: { select: { id: true, domain: true } },
+            site: { select: { id: true, domain: true, cms: true } },
         },
     });
+    // Components and the CMS are stored in one batch, so a site that has components has a CMS.
+    return rows.map(({ site: { cms, ...site }, ...row }) => ({ ...row, cms: cms ?? '', site }));
 }
 
 // ============ Settings ============

@@ -30,6 +30,7 @@ describe('groupComponents', () => {
         version: string | null,
         overrides: Partial<ComponentRow> = {},
     ): ComponentRow => ({
+        cms: 'wordpress',
         type: 'plugin',
         slug,
         name: slug,
@@ -48,6 +49,7 @@ describe('groupComponents', () => {
 
         expect(usage).toEqual([
             {
+                cms: 'wordpress',
                 type: 'plugin',
                 slug: 'forms',
                 name: 'Forms',
@@ -58,6 +60,18 @@ describe('groupComponents', () => {
                     { version: null, sites: [site(4)] },
                 ],
             },
+        ]);
+    });
+
+    it('keeps the themes of two CMS apart even under one slug', () => {
+        const usage = groupComponents([
+            row(1, 'classic', '1.4', { type: 'theme' }),
+            row(2, 'classic', '2.2.0', { type: 'theme', cms: 'prestashop' }),
+        ]);
+
+        expect(usage.map((entry) => [entry.cms, entry.siteCount])).toEqual([
+            ['wordpress', 1],
+            ['prestashop', 1],
         ]);
     });
 

@@ -29,11 +29,13 @@ const LINKS = [
 export function Sidebar({
     user,
     siteCount,
+    version,
     open,
     onClose,
 }: {
     user: SidebarUser;
     siteCount: number;
+    version: string;
     open: boolean;
     onClose: () => void;
 }) {
@@ -54,6 +56,7 @@ export function Sidebar({
                     {/* A fixed 32px mark: nothing for next/image to optimise. */}
                     <img src="/logo.svg" alt="" width={32} height={32} className="rounded-md" />
                     <span className="text-lg font-semibold tracking-[-0.01em]">Reposite</span>
+                    <span className="ml-auto text-xs opacity-70">v{version}</span>
                 </div>
 
                 <div className="flex flex-col gap-1 px-3 py-2">

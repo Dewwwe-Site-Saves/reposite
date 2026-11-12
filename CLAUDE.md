@@ -4,7 +4,7 @@ Self-hosted backup manager for WordPress sites: pulls files over FTP/SFTP, dumps
 
 ## State
 
-v2 is in production since 2026-09-06 (Docker image from GHCR, Portainer stack, behind an HTTPS reverse proxy with SSO in front). `main` is the only branch; features branch off it and merge back. [ROADMAP.md](./ROADMAP.md) lists the checks still pending on the production instance and what comes next: look there before proposing a feature, and move an item out of it when it ships.
+The app is in production since 2026-09-06 (Docker image from GHCR, Portainer stack, behind an HTTPS reverse proxy with SSO in front). `main` is the only branch; features branch off it and merge back. [ROADMAP.md](./ROADMAP.md) lists the checks still pending on the production instance and what comes next: look there before proposing a feature, and move an item out of it when it ships.
 
 ## Engine
 
@@ -62,7 +62,7 @@ v2 is in production since 2026-09-06 (Docker image from GHCR, Portainer stack, b
 
 ## Docker
 
-Two stages on `node:24-alpine3.23` (`ARG NODE_IMAGE`): the Node major and the Alpine release are pinned, the Node minor and patch float so that each build picks up the current security release, like `.nvmrc` does for CI. Never `node:24-alpine`, which moves the Alpine release underneath; bump Alpine explicitly, before Docker Hub stops rebuilding the tag for that release. `builder` (`npm ci`, `next build` standalone, then `npm prune --omit=dev` in place; no `--max-old-space-size`, Next strips it from its build worker) and `runner` (git, dumb-init, su-exec). One build stage on purpose: a separate `prod-deps` stage runs in parallel with the build under BuildKit and doubles the peak memory. The runner copies the standalone output, then the full production `node_modules` on top of it, then `prisma/`, `helpers/`, `scripts/`, `lib/` and the generated client: `prisma` and `tsx` are runtime dependencies on purpose so that `prisma migrate deploy` and the operator scripts run in the container.
+Two stages on `node:24-alpine3.23` (`ARG NODE_IMAGE`): the Node major and the Alpine release are pinned, the Node minor and patch float so that each build picks up the current security release, like `.nvmrc` does for CI. Never `node:24-alpine`, which moves the Alpine release underneath; bump Alpine explicitly, before Docker Hub stops rebuilding the tag for that release. `builder` (`npm ci`, `next build` standalone, then `npm prune --omit=dev` in place; no `--max-old-space-size`, Next strips it from its build worker) and `runner` (git, dumb-init, su-exec). One build stage on purpose: a separate `prod-deps` stage runs in parallel with the build under BuildKit and doubles the peak memory. The runner copies the standalone output, `.next/static` and `public/` (the standalone output contains neither), then the full production `node_modules` on top of it, then `prisma/`, `helpers/`, `scripts/`, `lib/` and the generated client: `prisma` and `tsx` are runtime dependencies on purpose so that `prisma migrate deploy` and the operator scripts run in the container.
 
 The entrypoint runs as root only to map PUID/PGID, give `/data` to that user (top-level entries, plus a recursive pass on any clone under `files/` owned by someone else) and apply the migrations, then drops to the app user for `node server.js`. `DATA_DIR=/data`, `PORT=3000`, `/api/health` answers the `HEALTHCHECK`.
 
