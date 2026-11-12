@@ -15,6 +15,7 @@ const { cron, db, queue } = vi.hoisted(() => ({
     db: {
         sites: [] as unknown[],
         defaultCron: '0 3 * * *',
+        defaultInventoryCron: '0 4 * * *',
     },
     queue: {
         enqueue: vi.fn(),
@@ -26,7 +27,10 @@ vi.mock('node-cron', () => ({
 }));
 
 vi.mock('../db', () => ({
-    getSettings: async () => ({ defaultCron: db.defaultCron }),
+    getSettings: async () => ({
+        defaultCron: db.defaultCron,
+        defaultInventoryCron: db.defaultInventoryCron,
+    }),
     listSites: async () => db.sites,
 }));
 
@@ -57,7 +61,7 @@ function site(id: number, overrides: Partial<SiteSummary> = {}): SiteSummary {
         cms: null,
         cmsVersion: null,
         inventoryAt: null,
-        inventoryEnabled: true,
+        inventoryEnabled: false,
         inventoryCronSchedule: null,
         ...overrides,
     };
@@ -95,7 +99,29 @@ describe('reload', () => {
             ['0 3 * * *', { timezone: 'Europe/Paris' }],
             ['30 4 * * 1', { timezone: 'Europe/Paris' }],
         ]);
-        expect(scheduler.scheduledSiteIds()).toEqual([1, 2]);
+        expect(scheduler.scheduledSiteIds('backup')).toEqual([1, 2]);
+    });
+
+    it('schedules the inventory of a site on its own switch and cron', async () => {
+        db.sites = [
+            site(1, { inventoryEnabled: true }),
+            site(2, {
+                enabled: false,
+                inventoryEnabled: true,
+                inventoryCronSchedule: '15 5 * * *',
+            }),
+            site(3),
+        ];
+        await scheduler.reload();
+
+        expect(cron.tasks.map((t) => t.expression)).toEqual([
+            '0 3 * * *',
+            '0 4 * * *',
+            '15 5 * * *',
+            '0 3 * * *',
+        ]);
+        expect(scheduler.scheduledSiteIds('backup')).toEqual([1, 3]);
+        expect(scheduler.scheduledSiteIds('inventory')).toEqual([1, 2]);
     });
 
     it('leaves the timezone to node-cron when TZ is unset', async () => {
@@ -115,14 +141,14 @@ describe('reload', () => {
 
         expect(first.destroy).toHaveBeenCalledOnce();
         expect(second.destroy).toHaveBeenCalledOnce();
-        expect(scheduler.scheduledSiteIds()).toEqual([2]);
+        expect(scheduler.scheduledSiteIds('backup')).toEqual([2]);
         expect(cron.tasks.at(-1)?.expression).toBe('0 1 * * *');
     });
 
     it('serializes concurrent reloads', async () => {
         db.sites = [site(1)];
         await Promise.all([scheduler.reload(), scheduler.reload()]);
-        expect(scheduler.scheduledSiteIds()).toEqual([1]);
+        expect(scheduler.scheduledSiteIds('backup')).toEqual([1]);
         expect(cron.tasks).toHaveLength(2);
         expect(cron.tasks[0].destroy).toHaveBeenCalledOnce();
         expect(cron.tasks[1].destroy).not.toHaveBeenCalled();
@@ -136,7 +162,7 @@ describe('reload', () => {
         db.sites = [site(1, { cronSchedule: 'nope' }), site(2)];
         await scheduler.reload();
 
-        expect(scheduler.scheduledSiteIds()).toEqual([2]);
+        expect(scheduler.scheduledSiteIds('backup')).toEqual([2]);
         expect(error).toHaveBeenCalledWith(expect.stringContaining('site1.example.com'));
         error.mockRestore();
     });
@@ -147,10 +173,23 @@ describe('task', () => {
         db.sites = [site(7)];
         await scheduler.reload();
         await cron.tasks[0].fn();
-        expect(queue.enqueue).toHaveBeenCalledWith(7, { triggerType: 'scheduled' });
+        expect(queue.enqueue).toHaveBeenCalledWith(7, {
+            kind: 'backup',
+            triggerType: 'scheduled',
+        });
     });
 
-    it('skips the run when the site already has an active backup', async () => {
+    it('enqueues a scheduled inventory on its own task', async () => {
+        db.sites = [site(7, { enabled: false, inventoryEnabled: true })];
+        await scheduler.reload();
+        await cron.tasks[0].fn();
+        expect(queue.enqueue).toHaveBeenCalledWith(7, {
+            kind: 'inventory',
+            triggerType: 'scheduled',
+        });
+    });
+
+    it('skips the run when the site already has an active job', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         queue.enqueue.mockRejectedValue(new JobConflictError(7));
         db.sites = [site(7)];
@@ -166,7 +205,7 @@ describe('stop', () => {
         db.sites = [site(1), site(2)];
         await scheduler.reload();
         await scheduler.stop();
-        expect(scheduler.scheduledSiteIds()).toEqual([]);
+        expect(scheduler.scheduledSiteIds('backup')).toEqual([]);
         expect(
             cron.tasks.every(
                 (t) => (t.destroy as ReturnType<typeof vi.fn>).mock.calls.length === 1,

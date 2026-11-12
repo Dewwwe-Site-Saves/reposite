@@ -10,6 +10,7 @@ import {
     useState,
 } from 'react';
 import { useRouter } from 'next/navigation';
+import type { JobKind } from '@/lib/constants';
 
 /**
  * One poller of `/api/status` for the whole page, shared through context: the sidebar counter, the history rows and the run buttons read the same snapshot. Server components are refreshed whenever the set of active backups changes (one queued, one claimed, one finished, queue drained), never on a plain tick.
@@ -21,6 +22,7 @@ export interface ActiveJob {
     id: number;
     siteId: number;
     domain: string;
+    kind: JobKind;
     status: 'pending' | 'running';
 }
 

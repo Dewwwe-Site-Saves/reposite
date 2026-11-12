@@ -12,6 +12,7 @@ import { prisma } from './prisma';
 import { ACTIVE_STATUSES, SECRET_MASK } from './validation';
 import type {
     ActiveStatus,
+    JobKind,
     JobsQuery,
     SettingsInput,
     SiteCreateInput,
@@ -170,6 +171,7 @@ export interface JobPage {
 
 export async function listJobs(query: JobsQuery): Promise<JobPage> {
     const where: Prisma.JobWhereInput = {
+        ...(query.kind === 'all' ? {} : { kind: query.kind }),
         ...(query.siteId ? { siteId: query.siteId } : {}),
         ...(query.status ? { status: query.status } : {}),
     };
@@ -198,6 +200,7 @@ export interface ActiveJob {
     id: number;
     siteId: number;
     domain: string;
+    kind: JobKind;
     status: ActiveStatus;
 }
 
@@ -205,13 +208,20 @@ export interface ActiveJob {
 export async function listActiveJobs(): Promise<ActiveJob[]> {
     const rows = await prisma.job.findMany({
         where: { status: { in: [...ACTIVE_STATUSES] } },
-        select: { id: true, siteId: true, status: true, site: { select: { domain: true } } },
+        select: {
+            id: true,
+            siteId: true,
+            kind: true,
+            status: true,
+            site: { select: { domain: true } },
+        },
         orderBy: { id: 'asc' },
     });
     return rows.map((row) => ({
         id: row.id,
         siteId: row.siteId,
         domain: row.site.domain,
+        kind: row.kind as JobKind,
         status: row.status as ActiveStatus,
     }));
 }

@@ -195,7 +195,7 @@ describe('worker', () => {
         expect(engine.calls[0].localRoot).toBe(path.join(dataDir, 'files', 'a-example-com'));
         expect(buffered(id)).toEqual([expect.objectContaining({ msg: 'fake run' })]);
         expect(await listActiveJobs()).toEqual([
-            { id, siteId: siteA, domain: 'a.example.com', status: 'running' },
+            { id, siteId: siteA, domain: 'a.example.com', kind: 'backup', status: 'running' },
         ]);
 
         releaseNext();

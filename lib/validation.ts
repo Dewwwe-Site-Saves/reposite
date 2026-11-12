@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import { validate as validateCron } from 'node-cron';
-import { JOB_STATUSES, PROTOCOLS, SECRET_MASK, SMTP_SECURITIES } from './constants';
+import { JOB_KINDS, JOB_STATUSES, PROTOCOLS, SECRET_MASK, SMTP_SECURITIES } from './constants';
 
 // The constants live in `constants.ts` (browser-safe); re-exported so server code keeps one import.
 export {
     ACTIVE_STATUSES,
+    JOB_KINDS,
     JOB_STATUSES,
     PROTOCOLS,
     SECRET_MASK,
@@ -191,18 +192,26 @@ export const smtpTestSchema = z.object(smtpFields);
 
 export type SmtpTestInput = z.infer<typeof smtpTestSchema>;
 
-// ============ Backups ============
+// ============ Jobs ============
 
-export const runBackupSchema = z.object({
-    /** Omitted = every enabled site. */
-    siteIds: z.array(z.number().int().positive()).optional(),
-    fullDownload: z.boolean().default(false),
-    skipGit: z.boolean().default(false),
-});
+export const runJobsSchema = z
+    .object({
+        kind: z.enum(JOB_KINDS).default('backup'),
+        /** Omitted = every site that has this kind switched on. */
+        siteIds: z.array(z.number().int().positive()).optional(),
+        fullDownload: z.boolean().default(false),
+        skipGit: z.boolean().default(false),
+    })
+    .refine((data) => data.kind === 'backup' || (!data.fullDownload && !data.skipGit), {
+        message: 'fullDownload and skipGit only apply to a backup',
+        path: ['kind'],
+    });
 
-export type RunBackupInput = z.infer<typeof runBackupSchema>;
+export type RunJobsInput = z.infer<typeof runJobsSchema>;
 
 export const jobsQuerySchema = z.object({
+    /** Backups unless asked otherwise: inventories run daily and would drown them. */
+    kind: z.enum([...JOB_KINDS, 'all']).default('backup'),
     siteId: z.coerce.number().int().positive().optional(),
     status: z.enum(JOB_STATUSES).optional(),
     page: z.coerce.number().int().min(1).default(1),

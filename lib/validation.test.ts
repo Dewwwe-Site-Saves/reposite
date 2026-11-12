@@ -7,6 +7,7 @@ import {
     recipientsSchema,
     repoNameSchema,
     repoUrlSchema,
+    runJobsSchema,
     settingsSchema,
     siteCreateSchema,
     siteUpdateSchema,
@@ -184,10 +185,11 @@ describe('settingsSchema', () => {
 
 describe('jobsQuerySchema', () => {
     it('coerces query strings with defaults', () => {
-        expect(jobsQuerySchema.parse({})).toEqual({ page: 1, pageSize: 20 });
+        expect(jobsQuerySchema.parse({})).toEqual({ kind: 'backup', page: 1, pageSize: 20 });
         expect(
             jobsQuerySchema.parse({ siteId: '3', status: 'error', page: '2', pageSize: '50' }),
         ).toEqual({
+            kind: 'backup',
             siteId: 3,
             status: 'error',
             page: 2,
@@ -195,9 +197,33 @@ describe('jobsQuerySchema', () => {
         });
     });
 
+    it('lists backups unless another kind, or all of them, is asked for', () => {
+        expect(jobsQuerySchema.parse({ kind: 'inventory' }).kind).toBe('inventory');
+        expect(jobsQuerySchema.parse({ kind: 'all' }).kind).toBe('all');
+        expect(jobsQuerySchema.safeParse({ kind: 'scan' }).success).toBe(false);
+    });
+
     it('rejects unknown statuses and oversized pages', () => {
         expect(jobsQuerySchema.safeParse({ status: 'done' }).success).toBe(false);
         expect(jobsQuerySchema.safeParse({ pageSize: '500' }).success).toBe(false);
+    });
+});
+
+describe('runJobsSchema', () => {
+    it('queues backups by default', () => {
+        expect(runJobsSchema.parse({})).toEqual({
+            kind: 'backup',
+            fullDownload: false,
+            skipGit: false,
+        });
+    });
+
+    it('accepts an inventory but none of the backup options with it', () => {
+        expect(runJobsSchema.parse({ kind: 'inventory', siteIds: [3] }).kind).toBe('inventory');
+        expect(runJobsSchema.safeParse({ kind: 'inventory', skipGit: true }).success).toBe(false);
+        expect(runJobsSchema.safeParse({ kind: 'inventory', fullDownload: true }).success).toBe(
+            false,
+        );
     });
 });
 

@@ -18,7 +18,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
 /** Filters and page from the URL; anything malformed falls back to the first unfiltered page. */
 function parseQuery(params: SearchParams): JobsQuery {
     const raw = Object.fromEntries(
-        ['siteId', 'status', 'page']
+        ['kind', 'siteId', 'status', 'page']
             .map((key) => [key, params[key]] as const)
             .filter(([, value]) => typeof value === 'string' && value !== ''),
     );
@@ -28,6 +28,7 @@ function parseQuery(params: SearchParams): JobsQuery {
 
 function pageHref(query: JobsQuery, page: number): string {
     const params = new URLSearchParams();
+    if (query.kind !== 'backup') params.set('kind', query.kind);
     if (query.siteId) params.set('siteId', String(query.siteId));
     if (query.status) params.set('status', query.status);
     if (page > 1) params.set('page', String(page));

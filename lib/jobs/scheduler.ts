@@ -1,27 +1,34 @@
 import { schedule, type ScheduledTask } from 'node-cron';
+import type { JobKind } from '../constants';
 import { getSettings, listSites } from '../db';
 import { errorMessage } from '../engine/cancel';
 import { JobConflictError, enqueue } from './queue';
 
 /**
- * One node-cron task per enabled site, firing `enqueue(siteId, { triggerType: 'scheduled' })`. The schedule is `site.cronSchedule`, or `Settings.defaultCron` when the site has none, in the `TZ` timezone. `reload()` rebuilds everything from the database and must be called after every site or settings mutation; the boot hook calls it once at startup.
+ * Up to two node-cron tasks per site, each firing `enqueue(siteId, { kind, triggerType: 'scheduled' })`: a backup when the site is `enabled`, on `site.cronSchedule` or `Settings.defaultCron`, and an inventory when it is `inventoryEnabled`, on `site.inventoryCronSchedule` or `Settings.defaultInventoryCron`. The two switches are independent. Everything runs in the `TZ` timezone. `reload()` rebuilds the tasks from the database and must be called after every site or settings mutation; the boot hook calls it once at startup.
  */
 
+interface ScheduledJob {
+    siteId: number;
+    kind: JobKind;
+    task: ScheduledTask;
+}
+
 interface SchedulerState {
-    tasks: Map<number, ScheduledTask>;
+    jobs: ScheduledJob[];
     /** Reloads run one at a time so two mutations in a row cannot double-schedule a site. */
     reloading: Promise<void>;
 }
 
 // Process-wide singleton on globalThis: `next dev` hot reloads leave no orphan cron tasks, and in production the boot hook and the route bundles may not share a module instance.
-const globalForScheduler = globalThis as unknown as { backupScheduler?: SchedulerState };
+const globalForScheduler = globalThis as unknown as { jobScheduler?: SchedulerState };
 
-const state: SchedulerState = (globalForScheduler.backupScheduler ??= {
-    tasks: new Map(),
+const state: SchedulerState = (globalForScheduler.jobScheduler ??= {
+    jobs: [],
     reloading: Promise.resolve(),
 });
 
-/** Drops every task and schedules the enabled sites again from the database. */
+/** Drops every task and schedules the sites again from the database. */
 export function reload(): Promise<void> {
     const run = state.reloading.then(rebuild, rebuild);
     state.reloading = run;
@@ -30,15 +37,15 @@ export function reload(): Promise<void> {
 
 /** Drops every task. Nothing runs until the next `reload()`. */
 export async function stop(): Promise<void> {
-    for (const task of state.tasks.values()) {
-        await task.destroy();
+    for (const job of state.jobs) {
+        await job.task.destroy();
     }
-    state.tasks.clear();
+    state.jobs = [];
 }
 
-/** Site ids with an active cron task, for status pages and tests. */
-export function scheduledSiteIds(): number[] {
-    return [...state.tasks.keys()];
+/** Site ids with an active cron task of that kind, for status pages and tests. */
+export function scheduledSiteIds(kind: JobKind): number[] {
+    return state.jobs.filter((job) => job.kind === kind).map((job) => job.siteId);
 }
 
 async function rebuild(): Promise<void> {
@@ -47,34 +54,41 @@ async function rebuild(): Promise<void> {
     const timezone = process.env.TZ || undefined;
     const armed: string[] = [];
 
-    for (const site of sites) {
-        if (!site.enabled) continue;
-        const expression = site.cronSchedule ?? settings.defaultCron;
+    function arm(site: { id: number; domain: string }, kind: JobKind, expression: string): void {
         try {
-            const task = schedule(expression, () => trigger(site.id, site.domain), { timezone });
-            state.tasks.set(site.id, task);
-            armed.push(`${site.domain} "${expression}"`);
+            const task = schedule(expression, () => trigger(site.id, site.domain, kind), {
+                timezone,
+            });
+            state.jobs.push({ siteId: site.id, kind, task });
+            armed.push(`${site.domain} ${kind} "${expression}"`);
         } catch (error) {
-            // Expressions are validated on input; a bad one must not take the other sites down.
+            // Expressions are validated on input; a bad one must not take the other schedules down.
             console.error(
-                `[scheduler] ${site.domain}: cannot schedule "${expression}": ${errorMessage(error)}`,
+                `[scheduler] ${site.domain}: cannot schedule ${kind} "${expression}": ${errorMessage(error)}`,
             );
+        }
+    }
+
+    for (const site of sites) {
+        if (site.enabled) arm(site, 'backup', site.cronSchedule ?? settings.defaultCron);
+        if (site.inventoryEnabled) {
+            arm(site, 'inventory', site.inventoryCronSchedule ?? settings.defaultInventoryCron);
         }
     }
     // Every reload (boot, site or settings change) shows what is armed, so a schedule edit is visible in the server log.
     console.log(
-        `[scheduler] ${armed.length} site(s) scheduled (TZ ${timezone ?? 'system'})${armed.length ? ': ' + armed.join(', ') : ''}`,
+        `[scheduler] ${armed.length} schedule(s) armed (TZ ${timezone ?? 'system'})${armed.length ? ': ' + armed.join(', ') : ''}`,
     );
 }
 
-async function trigger(siteId: number, domain: string): Promise<void> {
+async function trigger(siteId: number, domain: string, kind: JobKind): Promise<void> {
     try {
-        await enqueue(siteId, { triggerType: 'scheduled' });
+        await enqueue(siteId, { kind, triggerType: 'scheduled' });
     } catch (error) {
         if (error instanceof JobConflictError) {
-            console.warn(`[scheduler] ${domain}: skipped, a backup is already active`);
+            console.warn(`[scheduler] ${domain}: ${kind} skipped, another job is active`);
             return;
         }
-        console.error(`[scheduler] ${domain}: ${errorMessage(error)}`);
+        console.error(`[scheduler] ${domain}: ${kind}: ${errorMessage(error)}`);
     }
 }
