@@ -2,13 +2,14 @@ import { schedule, type ScheduledTask } from 'node-cron';
 import { assertEncryptionKey } from '../crypto';
 import { getSettings } from '../db';
 import { errorMessage } from '../engine/cancel';
+import * as gristPush from '../grist/push';
 import * as notifier from '../notifications/notifier';
 import { initDatabase, prisma } from '../prisma';
 import { ACTIVE_STATUSES, JOB_KINDS, type JobKind } from '../constants';
 import * as scheduler from './scheduler';
 
 /**
- * Server start-up, called once from `instrumentation.ts`: environment checks, database pragmas, orphan job sweep, scheduler, daily retention. A second call in the same process (dev hot reload) skips the sweep, the queue is still alive and its rows are not orphans.
+ * Server start-up, called once from `instrumentation.ts`: environment checks, database pragmas, orphan job sweep, notifier, Grist push, scheduler, daily retention. A second call in the same process (dev hot reload) skips the sweep, the queue is still alive and its rows are not orphans.
  */
 
 /** Jobs of each kind to keep per site whatever their age. */
@@ -45,6 +46,7 @@ export async function boot(): Promise<void> {
     }
 
     notifier.start();
+    gristPush.start();
     await scheduler.reload();
 
     await state.retention?.destroy();

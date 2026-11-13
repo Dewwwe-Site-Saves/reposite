@@ -21,7 +21,7 @@ npm run typecheck
 npm test
 ```
 
-First start opens a setup page to create the admin account (email + password, 12 characters minimum), then lands on Settings. Settings is split in sections, one route each: Account (`/settings`), GitHub, SharePoint, Schedule & queue and Notifications. Fill in the GitHub author and token first (`/settings/github`), the sites come next. The password is changed from the Account section. Lost password:
+First start opens a setup page to create the admin account (email + password, 12 characters minimum), then lands on Settings. Settings is split in sections, one route each: Account (`/settings`), GitHub, SharePoint, Grist, Schedule & queue and Notifications. Fill in the GitHub author and token first (`/settings/github`), the sites come next. The password is changed from the Account section. Lost password:
 
 ```bash
 npx tsx scripts/reset-password.ts admin@example.com   # prints a generated password
@@ -36,7 +36,7 @@ Environment variables, see [.env.example](./.env.example):
 - `SESSION_SECRET` — signs the session cookie
 - `SESSION_COOKIE_SECURE` — `false` to allow the session cookie over plain HTTP (production marks it Secure by default)
 - `TZ` — timezone for cron schedules
-- `APP_URL` — public URL of the instance, for the links in notification mails (optional)
+- `APP_URL` — public URL of the instance, for the links in notification mails and in Grist (optional)
 
 ### GitHub
 
@@ -68,6 +68,35 @@ openssl rsa -in keytmp.pem -out key.pem -passin pass:HereIsMySuperPass
 6. Fill in the SharePoint section in Settings, then set the list item ID on each site
 
 > Certificates expire and you will have to regenerate it every year!!
+
+### Grist
+
+The app can keep a [Grist](https://www.getgrist.com) document up to date with what it knows of each site: one row per site, and one row per installed component. The Grist section of Settings takes the address of the server, an API key (stored encrypted), the document ID and the ids of the two tables; the components table is optional.
+
+The tables are yours: Reposite matches the row of a site on a `Domain` column, adds the row when no site has that domain, and then only writes the columns below, only when they exist, and only the cells whose value changed. It never deletes a row and never empties a cell it has no value for. A column you do not want is a column you do not create.
+
+| Table | Column | Type | Content |
+|---|---|---|---|
+| Sites | `Domain` | Text | **required**, the key: host name alone, with or without `www.` |
+| Sites | `Title`, `Url` | Text | written once, when Reposite adds the row |
+| Sites | `CMS` | Text or Choice | `WordPress` or `PrestaShop`, written only while the cell is empty |
+| Sites | `CmsVersion` | Text | version of the core |
+| Sites | `InventoryAt` | DateTime | last complete inventory |
+| Sites | `LastBackupAt` | DateTime | last successful backup |
+| Sites | `LastBackupStatus` | Text or Choice | outcome of the last backup that ran: `success`, `error`, `cancelled` |
+| Sites | `LastBackupUrl` | Text | last Release created by a backup |
+| Sites | `RepositeUrl` | Text | page of the site in Reposite (needs `APP_URL`), emptied when the site is deleted |
+| Components | `Site` | Reference to the sites table | **required** |
+| Components | `Type` | Text or Choice | **required**: `core`, `plugin`, `mu-plugin`, `module`, `theme` |
+| Components | `Slug` | Text | **required**, folder name of the component |
+| Components | `Name`, `Version` | Text | as read by the inventory |
+| Components | `PreviousVersion`, `VersionChangedAt` | Text, DateTime | filled when the version changes |
+| Components | `Status` | Text or Choice | `installed`, or `removed` once the inventory no longer finds it |
+| Components | `RemovedAt` | DateTime | when it went missing; the row stays, and is revived if the component comes back |
+
+The column ids are fixed, their labels are free. "Test connection" reads the document without writing: it lists the columns each table lacks and the sites that have no row yet. A site is pushed at the end of each of its backups and inventories, and "Sync all now" pushes them all, for the first fill. A push that fails is shown in the section and made up for by the next one; it never affects a run.
+
+The API key must reach Grist itself. Behind a login proxy (Authelia, Authentik...) the public address answers with a redirect to the login page, which the section reports: use the internal address of the server instead.
 
 ## How it works
 
@@ -125,7 +154,7 @@ Every site with scheduled backups is scheduled with node-cron, on its own cron e
 ## Error handling
 
 - A backup never crashes the app — every run ends with a status (`success`, `error`, `cancelled`) and its log
-- SharePoint, release and inventory errors are non-blocking (backup is still considered successful)
+- SharePoint, Grist, release and inventory errors are non-blocking (backup is still considered successful)
 - A failed inventory run leaves the previous inventory of the site in place
 - Git errors are reported, the backup is marked as error
 - On dump failure, remote files (PHP, token) are cleaned up
@@ -146,6 +175,17 @@ To read the inventory of a site without storing anything:
 ```bash
 npx tsx scripts/smoke-inventory.ts your-site.com   # CMS, plugins, themes and versions, read-only
 ```
+
+To try the Grist push against a throwaway Grist instead of a real document (the data lands under `data/`, which git and the image build ignore):
+
+```bash
+docker run -d --name grist-dev -p 127.0.0.1:8484:8484 \
+  -v "$PWD/data/grist-dev:/persist" \
+  -e GRIST_SESSION_SECRET=dev-only -e GRIST_DEFAULT_EMAIL=dev@example.com \
+  gristlabs/grist:stable
+```
+
+Open `http://localhost:8484`, create a document with the two tables (or import a copy of a real one), create an API key in the profile settings, then fill the Grist section with `http://localhost:8484`, the key and the Document ID of that document. `docker stop grist-dev` and `docker start grist-dev` keep it across sessions; `docker rm -f grist-dev` and deleting `data/grist-dev` remove it.
 
 ## Deploy (Docker)
 

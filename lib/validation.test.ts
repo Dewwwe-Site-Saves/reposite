@@ -197,6 +197,30 @@ describe('settingsSchema', () => {
         ).toBeUndefined();
         expect(settingsSchema.parse({ ...base, smtpPassword: 'pw' }).smtpPassword).toBe('pw');
     });
+
+    it('stores the Grist server without its trailing slash and refuses anything but http(s)', () => {
+        const result = settingsSchema.parse({ ...base, gristUrl: ' https://grist.example.com/ ' });
+        expect(result).toMatchObject({
+            gristUrl: 'https://grist.example.com',
+            gristDocId: null,
+            gristSitesTable: null,
+            gristComponentsTable: null,
+        });
+        expect(settingsSchema.parse({ ...base, gristUrl: '' }).gristUrl).toBeNull();
+        expect(settingsSchema.safeParse({ ...base, gristUrl: 'grist.example.com' }).success).toBe(
+            false,
+        );
+        expect(settingsSchema.safeParse({ ...base, gristUrl: 'ftp://grist.test' }).success).toBe(
+            false,
+        );
+    });
+
+    it('treats an empty or masked Grist key as "keep"', () => {
+        expect(
+            settingsSchema.parse({ ...base, gristApiKey: '••••••' }).gristApiKey,
+        ).toBeUndefined();
+        expect(settingsSchema.parse({ ...base, gristApiKey: ' key ' }).gristApiKey).toBe('key');
+    });
 });
 
 describe('jobsQuerySchema', () => {

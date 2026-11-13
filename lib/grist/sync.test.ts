@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Component } from '../engine/inventory/types';
 import { GristApiError, listColumnIds } from './client';
-import { syncSite, type GristConfig, type SiteSnapshot } from './sync';
+import { FakeGrist } from './testing/fake-grist';
+import { clearSiteLink, syncSite, type GristConfig, type SiteSnapshot } from './sync';
 
 const config: GristConfig = {
     serverUrl: 'https://grist.example.com/',
@@ -10,96 +11,6 @@ const config: GristConfig = {
     sitesTable: 'Sites',
     componentsTable: 'Components',
 };
-
-type Row = { id: number; fields: Record<string, unknown> };
-
-interface Call {
-    method: string;
-    table: string;
-    body: { records: { id?: number; fields: Record<string, unknown> }[] } | null;
-}
-
-/**
- * In-memory Grist document behind `fetch`: columns, filtered reads, adds and updates. An update request behaves like the real server, which builds one bulk action over the union of the columns named in the request: a row that leaves one of them out gets it emptied.
- */
-class FakeGrist {
-    readonly tables = new Map<string, { columns: string[]; rows: Row[] }>();
-    readonly calls: Call[] = [];
-    private nextId = 1;
-
-    table(name: string, columns: string[], rows: Record<string, unknown>[] = []): this {
-        this.tables.set(name, {
-            columns,
-            rows: rows.map((fields) => ({ id: this.nextId++, fields: { ...fields } })),
-        });
-        return this;
-    }
-
-    rows(name: string): Row[] {
-        return this.tables.get(name)!.rows;
-    }
-
-    writes(): Call[] {
-        return this.calls.filter((call) => call.method !== 'GET');
-    }
-
-    install(): this {
-        vi.stubGlobal('fetch', async (input: string, init: RequestInit) =>
-            this.handle(input, init),
-        );
-        return this;
-    }
-
-    private handle(input: string, init: RequestInit): Response {
-        const url = new URL(input);
-        const match = /^\/api\/docs\/doc1\/tables\/([^/]+)\/(columns|records)$/.exec(url.pathname);
-        const table = match && this.tables.get(match[1]!);
-        if (!match || !table) return json(404, { error: 'Table not found' });
-        if ((init.headers as Record<string, string>).Authorization !== 'Bearer secret-key') {
-            return json(401, { error: 'invalid API key' });
-        }
-        const method = init.method ?? 'GET';
-        const body = init.body ? (JSON.parse(init.body as string) as Call['body']) : null;
-        this.calls.push({ method, table: match[1]!, body });
-
-        if (match[2] === 'columns') {
-            return json(200, { columns: table.columns.map((id) => ({ id, fields: {} })) });
-        }
-        if (method === 'GET') {
-            const filter = JSON.parse(url.searchParams.get('filter') ?? '{}') as Record<
-                string,
-                unknown[]
-            >;
-            const records = table.rows.filter((row) =>
-                Object.entries(filter).every(([column, values]) =>
-                    values.includes(row.fields[column] ?? null),
-                ),
-            );
-            return json(200, { records });
-        }
-        if (method === 'POST') {
-            const added = body!.records.map(({ fields }) => {
-                const row = { id: this.nextId++, fields: { ...fields } };
-                table.rows.push(row);
-                return { id: row.id };
-            });
-            return json(200, { records: added });
-        }
-        const named = new Set(body!.records.flatMap((record) => Object.keys(record.fields)));
-        for (const record of body!.records) {
-            const row = table.rows.find((candidate) => candidate.id === record.id)!;
-            for (const column of named) row.fields[column] = record.fields[column] ?? null;
-        }
-        return json(200, null);
-    }
-}
-
-function json(status: number, payload: unknown): Response {
-    return new Response(JSON.stringify(payload), {
-        status,
-        headers: { 'Content-Type': 'application/json' },
-    });
-}
 
 const SITE_COLUMNS = [
     'Title',
@@ -122,6 +33,7 @@ const COMPONENT_COLUMNS = [
     'Version',
     'PreviousVersion',
     'VersionChangedAt',
+    'Status',
     'RemovedAt',
     'Decision',
 ];
@@ -182,10 +94,10 @@ describe('syncSite, site row', () => {
         ]);
     });
 
-    it('marks the CMS as unknown on a new row, and names it once it is detected', async () => {
+    it('leaves the CMS empty until it is detected, then names it', async () => {
         const grist = document().install();
         await syncSite(config, snapshot({ cms: null, cmsVersion: null, inventoryAt: null }));
-        expect(grist.rows('Sites')[0]!.fields.CMS).toBe('Inconnu');
+        expect(grist.rows('Sites')[0]!.fields.CMS).toBeUndefined();
 
         await syncSite(config, snapshot({ cms: 'prestashop', cmsVersion: '8.2.3' }));
         expect(grist.rows('Sites')).toHaveLength(1);
@@ -266,6 +178,7 @@ describe('syncSite, site row', () => {
             'Components.Name',
             'Components.PreviousVersion',
             'Components.VersionChangedAt',
+            'Components.Status',
             'Components.RemovedAt',
         ]);
     });
@@ -297,6 +210,7 @@ describe('syncSite, components', () => {
                 Slug: 'wordpress',
                 Name: 'WordPress',
                 Version: '7.1.4',
+                Status: 'installed',
             },
             {
                 Site: report.siteRowId,
@@ -304,6 +218,7 @@ describe('syncSite, components', () => {
                 Slug: 'akismet',
                 Name: 'Akismet',
                 Version: '5.3',
+                Status: 'installed',
             },
             {
                 Site: report.siteRowId,
@@ -311,6 +226,7 @@ describe('syncSite, components', () => {
                 Slug: 'hello',
                 Name: 'Hello Dolly',
                 Version: '',
+                Status: 'installed',
             },
         ]);
     });
@@ -362,7 +278,7 @@ describe('syncSite, components', () => {
             removed: 1,
         });
         expect(grist.rows('Components')).toHaveLength(3);
-        expect(hello.fields.RemovedAt).toBe(epoch(later));
+        expect(hello.fields).toMatchObject({ Status: 'removed', RemovedAt: epoch(later) });
 
         // Still gone the next day: the date of the first absence stays.
         const before = grist.writes().length;
@@ -376,7 +292,11 @@ describe('syncSite, components', () => {
         );
         expect(back.components).toEqual({ added: 0, updated: 1, removed: 0 });
         expect(grist.rows('Components')).toHaveLength(3);
-        expect(hello.fields).toMatchObject({ RemovedAt: null, Decision: 'Remove' });
+        expect(hello.fields).toMatchObject({
+            Status: 'installed',
+            RemovedAt: null,
+            Decision: 'Remove',
+        });
     });
 
     it('only touches the rows of its own site', async () => {
@@ -403,6 +323,29 @@ describe('syncSite, components', () => {
 
         expect(report.components).toBeNull();
         expect(grist.rows('Components')).toEqual([]);
+    });
+});
+
+describe('clearSiteLink', () => {
+    it('empties the link of a site that left, and nothing else', async () => {
+        const grist = document().install();
+        await syncSite(config, snapshot());
+        const row = grist.rows('Sites')[0]!;
+        const components = structuredClone(grist.rows('Components'));
+
+        expect(await clearSiteLink(config, 'www.example.com')).toBe(true);
+        expect(row.fields).toMatchObject({
+            Domain: 'example.com',
+            RepositeUrl: '',
+            CmsVersion: '7.1.4',
+            LastBackupAt: epoch(BACKUP_AT),
+        });
+        expect(grist.rows('Components')).toEqual(components);
+
+        const before = grist.writes().length;
+        expect(await clearSiteLink(config, 'example.com')).toBe(false);
+        expect(await clearSiteLink(config, 'unknown.test')).toBe(false);
+        expect(grist.writes()).toHaveLength(before);
     });
 });
 

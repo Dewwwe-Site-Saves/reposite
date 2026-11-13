@@ -156,6 +156,32 @@ const storedSecret = z
     .optional()
     .transform((value) => (value && value !== SECRET_MASK ? value : undefined));
 
+/** Base URL of a server, stored without its trailing slash. */
+const optionalUrl = z
+    .string()
+    .trim()
+    .nullable()
+    .default(null)
+    .transform((value) => (value ? value.replace(/\/+$/, '') : null))
+    .refine((value) => value === null || isHttpUrl(value), 'Must be an http(s) URL');
+
+function isHttpUrl(value: string): boolean {
+    try {
+        return ['http:', 'https:'].includes(new URL(value).protocol);
+    } catch {
+        return false;
+    }
+}
+
+/** The push is on once the URL, the key, the document and the sites table are set; anything less is saved and stays off. */
+const gristFields = {
+    gristUrl: optionalUrl,
+    gristApiKey: storedSecret,
+    gristDocId: optionalText,
+    gristSitesTable: optionalText,
+    gristComponentsTable: optionalText,
+};
+
 const smtpFields = {
     notifyTo: recipientsSchema,
     smtpHost: optionalText,
@@ -178,6 +204,7 @@ export const settingsSchema = z
         spSiteName: optionalText,
         spListName: optionalText,
         spDateField: optionalText,
+        ...gristFields,
         defaultCron: cronSchema,
         concurrency: z.number().int().min(1).max(5),
         retentionDays: z.number().int().min(1).max(3650),
@@ -211,6 +238,9 @@ export const githubTestSchema = z.object({
 export const smtpTestSchema = z.object(smtpFields);
 
 export type SmtpTestInput = z.infer<typeof smtpTestSchema>;
+
+/** The Grist block as typed in the form; an empty or masked key means the stored one. */
+export const gristTestSchema = z.object(gristFields);
 
 // ============ Jobs ============
 

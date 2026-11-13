@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { apiHandler, jsonError, parseBody } from '@/lib/api';
 import { deleteSite, getSite, isUniqueViolation, listJobs, updateSite } from '@/lib/db';
+import * as gristPush from '@/lib/grist/push';
 import * as scheduler from '@/lib/jobs/scheduler';
 import { requireRole } from '@/lib/session';
 import { jobsQuerySchema, parseId, siteUpdateSchema } from '@/lib/validation';
@@ -47,5 +48,7 @@ export const DELETE = apiHandler(async (request: Request, { params }: Params) =>
 
     await deleteSite(site.id);
     await scheduler.reload();
+    // In the background: the answer must not wait for Grist. It logs its own failure.
+    void gristPush.unlinkSite(site.domain);
     return NextResponse.json({ success: true });
 });

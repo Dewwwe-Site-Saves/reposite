@@ -8,6 +8,7 @@ import {
     Book02Icon,
     Github01Icon,
     Notification01Icon,
+    Table01Icon,
     Time04Icon,
     UserIcon,
 } from '@hugeicons/core-free-icons';
@@ -25,6 +26,7 @@ export interface SectionStatus {
 export interface SettingsNavStatus {
     github: SectionStatus;
     sharepoint: SectionStatus;
+    grist: SectionStatus;
     notifications: SectionStatus;
 }
 
@@ -65,6 +67,12 @@ export function SettingsNav({ status }: { status: SettingsNavStatus }) {
                     label: 'SharePoint',
                     icon: Book02Icon,
                     status: status.sharepoint,
+                },
+                {
+                    href: '/settings/grist',
+                    label: 'Grist',
+                    icon: Table01Icon,
+                    status: status.grist,
                 },
                 {
                     href: '/settings/schedule',

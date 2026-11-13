@@ -17,6 +17,11 @@ export interface SettingsFormValues {
     spSiteName: string;
     spListName: string;
     spDateField: string;
+    gristUrl: string;
+    gristApiKey: string;
+    gristDocId: string;
+    gristSitesTable: string;
+    gristComponentsTable: string;
     defaultCron: string;
     concurrency: string;
     retentionDays: string;
@@ -45,6 +50,11 @@ export function toFormValues(settings: SettingsView): SettingsFormValues {
         spSiteName: settings.spSiteName ?? '',
         spListName: settings.spListName ?? '',
         spDateField: settings.spDateField ?? '',
+        gristUrl: settings.gristUrl ?? '',
+        gristApiKey: settings.gristApiKey,
+        gristDocId: settings.gristDocId ?? '',
+        gristSitesTable: settings.gristSitesTable ?? '',
+        gristComponentsTable: settings.gristComponentsTable ?? '',
         defaultCron: settings.defaultCron,
         concurrency: String(settings.concurrency),
         retentionDays: String(settings.retentionDays),
@@ -59,6 +69,17 @@ export function toFormValues(settings: SettingsView): SettingsFormValues {
         smtpUser: settings.smtpUser ?? '',
         smtpPassword: settings.smtpPassword,
         smtpFrom: settings.smtpFrom ?? '',
+    };
+}
+
+/** The Grist block as the test route wants it. */
+export function gristBody(form: SettingsFormValues) {
+    return {
+        gristUrl: form.gristUrl,
+        gristApiKey: form.gristApiKey,
+        gristDocId: form.gristDocId,
+        gristSitesTable: form.gristSitesTable,
+        gristComponentsTable: form.gristComponentsTable,
     };
 }
 
@@ -79,7 +100,7 @@ export interface SettingsSectionForm {
     form: SettingsFormValues;
     update: <K extends keyof SettingsFormValues>(field: K, value: SettingsFormValues[K]) => void;
     /** Whether a secret of that name sits in the database: the field offers "Replace" only then. */
-    stored: (field: 'githubToken' | 'smtpPassword') => boolean;
+    stored: (field: 'githubToken' | 'smtpPassword' | 'gristApiKey') => boolean;
     dirty: boolean;
     saving: boolean;
     error: string | null;

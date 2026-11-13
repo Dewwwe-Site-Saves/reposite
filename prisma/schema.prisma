@@ -41,6 +41,10 @@ model Site {
   inventoryEnabled      Boolean         @default(true)
   inventoryCronSchedule String? // null = use Settings.defaultInventoryCron
   components            SiteComponent[]
+
+  // Grist: outcome of the last push of this site (Settings, Grist)
+  gristSyncedAt  DateTime? // last push that went through
+  gristSyncError String? // why the last attempt failed, null once a push succeeds
 }
 
 // One row per plugin or theme installed on a site. Current state only: replaced as a whole by every complete inventory.
@@ -96,6 +100,11 @@ model Settings {
   spSiteName             String?
   spListName             String?
   spDateField            String?
+  gristUrl               String? // base URL of the Grist server, without /api
+  gristApiKeyEnc         String? // enc:v1:<iv>:<tag>:<ciphertext>
+  gristDocId             String?
+  gristSitesTable        String? // table id; with the three fields above, switches the push on
+  gristComponentsTable   String? // table id, empty = components are not pushed
   defaultCron            String   @default("0 2 1,15 * *") // 1st and 15th of the month at 02:00
   concurrency            Int      @default(2)
   retentionDays          Int      @default(90) // prune backup Job rows older than this

@@ -47,11 +47,23 @@ export const COMPONENT_COLUMNS = {
     version: 'Version',
     previousVersion: 'PreviousVersion',
     versionChangedAt: 'VersionChangedAt',
+    status: 'Status',
     removedAt: 'RemovedAt',
 } as const;
 
-/** Written in the CMS column when Reposite created or found the cell empty and has not detected the CMS yet. A later run replaces it; any other value was typed by someone and is left alone. */
-export const UNKNOWN_CMS = 'Inconnu';
+/** Without these columns there is nothing to match a row on: the sync refuses to run, the others are simply not written. */
+export const REQUIRED_SITE_COLUMNS: readonly string[] = [SITE_COLUMNS.domain];
+export const REQUIRED_COMPONENT_COLUMNS: readonly string[] = [
+    COMPONENT_COLUMNS.site,
+    COMPONENT_COLUMNS.type,
+    COMPONENT_COLUMNS.slug,
+];
+
+/** Values of the status column of a component. `installed` says the component is there and nothing more: whether it is active is not read yet, and will come as values of its own. */
+export const COMPONENT_STATUS = {
+    installed: 'installed',
+    removed: 'removed',
+} as const;
 
 /** Type of the row that carries the CMS core in the components table, next to the component types of the inventory. */
 export const CORE_TYPE = 'core';
@@ -137,43 +149,58 @@ async function syncSiteRow(
         // Nothing to say is not the same as "empty": a cell is never cleared.
         else if (value !== null) desired[column] = value;
     }
-    const cms = snapshot.cms ? CMS_LABELS[snapshot.cms] : UNKNOWN_CMS;
+    // The CMS column is filled in by people too, with products Reposite does not know: it is written only while it is empty, and left empty until the CMS is detected.
+    const cms = snapshot.cms && columns.has(SITE_COLUMNS.cms) ? CMS_LABELS[snapshot.cms] : null;
 
-    const matches = await listRecords(config, table, {
-        [SITE_COLUMNS.domain]: domainVariants(snapshot.domain),
-    });
-    if (matches.length > 1) {
-        throw new Error(
-            `Grist table ${table} has ${matches.length} rows for ${snapshot.domain} (rows ${matches.map((row) => row.id).join(', ')})`,
-        );
-    }
-
-    const existing = matches[0];
+    const existing = await findSiteRow(config, snapshot.domain);
     if (!existing) {
         const fields: Fields = { [SITE_COLUMNS.domain]: snapshot.domain, ...desired };
         if (columns.has(SITE_COLUMNS.title)) fields[SITE_COLUMNS.title] = snapshot.domain;
         if (columns.has(SITE_COLUMNS.url)) fields[SITE_COLUMNS.url] = `https://${snapshot.domain}`;
-        if (columns.has(SITE_COLUMNS.cms)) fields[SITE_COLUMNS.cms] = cms;
+        if (cms) fields[SITE_COLUMNS.cms] = cms;
         const [rowId] = await addRecords(config, table, [fields]);
         if (rowId === undefined) throw new Error(`Grist did not return the row added to ${table}`);
         return { rowId, created: true, columns: Object.keys(fields) };
     }
 
     const changes = changedCells(existing, desired);
-    if (columns.has(SITE_COLUMNS.cms)) {
-        const current = existing.fields[SITE_COLUMNS.cms];
-        if ((isEmpty(current) || current === UNKNOWN_CMS) && current !== cms) {
-            changes[SITE_COLUMNS.cms] = cms;
-        }
-    }
+    if (cms && isEmpty(existing.fields[SITE_COLUMNS.cms])) changes[SITE_COLUMNS.cms] = cms;
     await updateRecords(config, table, [{ id: existing.id, fields: changes }]);
     return { rowId: existing.id, created: false, columns: Object.keys(changes) };
 }
 
-/** A domain is looked up with and without its `www.`, whichever way the document writes it. */
-function domainVariants(domain: string): string[] {
-    const bare = domain.replace(/^www\./, '');
+/** The row of a domain, looked up with and without its `www.`, whichever way the document writes it. Two rows for one domain is an error: nothing says which one is the site. */
+async function findSiteRow(config: GristConfig, domain: string): Promise<GristRecord | undefined> {
+    const matches = await listRecords(config, config.sitesTable, {
+        [SITE_COLUMNS.domain]: domainVariants(domain),
+    });
+    if (matches.length > 1) {
+        throw new Error(
+            `Grist table ${config.sitesTable} has ${matches.length} rows for ${domain} (rows ${matches.map((row) => row.id).join(', ')})`,
+        );
+    }
+    return matches[0];
+}
+
+export function bareDomain(domain: string): string {
+    return domain.replace(/^www\./, '');
+}
+
+export function domainVariants(domain: string): string[] {
+    const bare = bareDomain(domain);
     return [bare, `www.${bare}`];
+}
+
+/**
+ * For a site that leaves Reposite: empties the link to its page, the one cell that would otherwise point nowhere. The row and everything else it holds stay, dates included, which then show how old they are. Resolves to whether a cell was emptied.
+ */
+export async function clearSiteLink(config: GristConfig, domain: string): Promise<boolean> {
+    const row = await findSiteRow(config, domain);
+    if (!row || isEmpty(row.fields[SITE_COLUMNS.repositeUrl])) return false;
+    await updateRecords(config, config.sitesTable, [
+        { id: row.id, fields: { [SITE_COLUMNS.repositeUrl]: '' } },
+    ]);
+    return true;
 }
 
 // ============ Components ============
@@ -187,8 +214,7 @@ async function syncComponents(
     missingColumns: string[],
 ): Promise<{ added: number; updated: number; removed: number }> {
     const columns = await listColumnIds(config, table);
-    const identity = [COMPONENT_COLUMNS.site, COMPONENT_COLUMNS.type, COMPONENT_COLUMNS.slug];
-    for (const column of identity) {
+    for (const column of REQUIRED_COMPONENT_COLUMNS) {
         if (!columns.has(column)) throw new Error(`Grist table ${table} has no ${column} column`);
     }
     const has = (column: string): boolean => columns.has(column);
@@ -241,8 +267,12 @@ async function syncComponents(
                 [COMPONENT_COLUMNS.slug]: component.slug,
             };
             if (has(COMPONENT_COLUMNS.name)) fields[COMPONENT_COLUMNS.name] = component.name;
-            if (has(COMPONENT_COLUMNS.version))
+            if (has(COMPONENT_COLUMNS.version)) {
                 fields[COMPONENT_COLUMNS.version] = component.version;
+            }
+            if (has(COMPONENT_COLUMNS.status)) {
+                fields[COMPONENT_COLUMNS.status] = COMPONENT_STATUS.installed;
+            }
             additions.push(fields);
             continue;
         }
@@ -264,6 +294,12 @@ async function syncComponents(
             }
         }
         // Back after having been removed: the row is the same one, with whatever was written next to it.
+        if (
+            has(COMPONENT_COLUMNS.status) &&
+            row.fields[COMPONENT_COLUMNS.status] !== COMPONENT_STATUS.installed
+        ) {
+            changes[COMPONENT_COLUMNS.status] = COMPONENT_STATUS.installed;
+        }
         if (has(COMPONENT_COLUMNS.removedAt) && !isEmpty(row.fields[COMPONENT_COLUMNS.removedAt])) {
             changes[COMPONENT_COLUMNS.removedAt] = null;
         }
@@ -273,11 +309,21 @@ async function syncComponents(
         }
     }
 
-    // A component the inventory no longer finds keeps its row and gets the date it went missing. Without the column there is nothing to mark it with, and the row is left as it is.
-    if (has(COMPONENT_COLUMNS.removedAt)) {
-        for (const [key, row] of existing) {
-            if (desired.has(key) || !isEmpty(row.fields[COMPONENT_COLUMNS.removedAt])) continue;
-            updates.push({ id: row.id, fields: { [COMPONENT_COLUMNS.removedAt]: readAt } });
+    // A component the inventory no longer finds keeps its row: its status says so and it gets the date it went missing, once. With neither column there is nothing to mark it with, and the row is left as it is.
+    for (const [key, row] of existing) {
+        if (desired.has(key)) continue;
+        const changes: Fields = {};
+        if (
+            has(COMPONENT_COLUMNS.status) &&
+            row.fields[COMPONENT_COLUMNS.status] !== COMPONENT_STATUS.removed
+        ) {
+            changes[COMPONENT_COLUMNS.status] = COMPONENT_STATUS.removed;
+        }
+        if (has(COMPONENT_COLUMNS.removedAt) && isEmpty(row.fields[COMPONENT_COLUMNS.removedAt])) {
+            changes[COMPONENT_COLUMNS.removedAt] = readAt;
+        }
+        if (Object.keys(changes).length > 0) {
+            updates.push({ id: row.id, fields: changes });
             removed++;
         }
     }

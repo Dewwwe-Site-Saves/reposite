@@ -53,19 +53,55 @@ async function request<T>(
                 ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
             },
             body: body !== undefined ? JSON.stringify(body) : undefined,
+            // The API never redirects. A redirect comes from whatever sits in front of the server, usually a login proxy that knows nothing of API keys: following it would end on its login page, with the key sent along.
+            redirect: 'manual',
             signal: AbortSignal.timeout(TIMEOUT_MS),
         },
     );
-    const payload: unknown = await response.json().catch(() => null);
+    const where = `${method} ${route.split('?')[0] || '/'}`;
+    if (response.status >= 300 && response.status < 400) {
+        throw new GristApiError(
+            response.status,
+            `${redirectTarget(response)} answered instead of Grist (redirect on ${where}): a login proxy sits in front of this URL, use an address that reaches Grist directly`,
+        );
+    }
+
+    const payload = parseJson(await response.text());
     if (!response.ok) {
         const detail =
             isRecord(payload) && typeof payload.error === 'string' ? `: ${payload.error}` : '';
         throw new GristApiError(
             response.status,
-            `Grist API ${response.status} on ${method} ${route.split('?')[0]}${detail}`,
+            `Grist API ${response.status} on ${where}${detail}`,
+        );
+    }
+    // Every read and every add answers with an object; only an update answers with nothing.
+    if (payload === undefined || (method !== 'PATCH' && !isRecord(payload))) {
+        throw new GristApiError(
+            response.status,
+            `Unexpected answer to ${where}: this URL does not lead to a Grist API`,
         );
     }
     return payload as T;
+}
+
+/** Undefined when the body is not JSON (an error page, or something that is not Grist); an empty body reads as null. */
+function parseJson(text: string): unknown {
+    if (text === '') return null;
+    try {
+        return JSON.parse(text) as unknown;
+    } catch {
+        return undefined;
+    }
+}
+
+/** Host a redirect points to, for the error message: the login portal names itself there. */
+function redirectTarget(response: Response): string {
+    try {
+        return new URL(response.headers.get('location') ?? '').host;
+    } catch {
+        return 'Something else';
+    }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,6 +110,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function records(table: string): string {
     return `/tables/${encodeURIComponent(table)}/records`;
+}
+
+export interface DocInfo {
+    name: string;
+    /** Role of the key on the document (`owners`, `editors`, `viewers`), null when the server does not say. */
+    access: string | null;
+}
+
+/** The document itself: proves the server, the key and the document id in one call. */
+export async function describeDoc(connection: GristConnection): Promise<DocInfo> {
+    const payload = await request<{ name?: unknown; access?: unknown }>(connection, 'GET', '');
+    return {
+        name: typeof payload.name === 'string' ? payload.name : connection.docId,
+        access: typeof payload.access === 'string' ? payload.access : null,
+    };
 }
 
 /** Ids of the columns of a table. Throws GristApiError 404 when the table does not exist. */
@@ -121,7 +172,7 @@ export async function addRecords(
 }
 
 /**
- * Writes the listed cells of existing rows, and only those. One request per set of columns: Grist turns a request into a single bulk action over the union of the columns it names, and a row that does not name one of them gets it emptied.
+ * Writes the listed cells of existing rows, and only those. One request per set of columns: Grist refuses an update whose rows do not all name the same columns (400, "PATCH requires all records to have same fields").
  */
 export async function updateRecords(
     connection: GristConnection,

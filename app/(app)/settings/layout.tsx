@@ -17,12 +17,20 @@ function navStatus(settings: SettingsView): SettingsNavStatus {
         settings.spDateField,
     );
 
+    const grist = Boolean(
+        settings.gristUrl &&
+        settings.gristApiKey === SECRET_MASK &&
+        settings.gristDocId &&
+        settings.gristSitesTable,
+    );
+
     return {
         github:
             settings.githubToken === SECRET_MASK
                 ? { text: 'Connected', tone: 'on' }
                 : { text: 'Not set', tone: 'off' },
         sharepoint: sharepoint ? { text: 'On', tone: 'on' } : { text: 'Off', tone: 'off' },
+        grist: grist ? { text: 'On', tone: 'on' } : { text: 'Off', tone: 'off' },
         notifications:
             settings.notifyOnError || settings.notifyOnInventoryError
                 ? { text: 'On', tone: 'on' }
@@ -37,7 +45,7 @@ export default async function SettingsLayout({ children }: { children: React.Rea
         <div className="space-y-3">
             <PageHeader
                 title="Settings"
-                subtitle="Configure GitHub repository integrations, SharePoint sync, alert triggers, and credentials."
+                subtitle="Configure GitHub repository integrations, SharePoint and Grist sync, alert triggers, and credentials."
             />
             <div className="flex flex-col gap-2.5 lg:flex-row">
                 <SettingsNav status={navStatus(settings)} />

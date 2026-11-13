@@ -63,6 +63,8 @@ function site(id: number, overrides: Partial<SiteSummary> = {}): SiteSummary {
         inventoryAt: null,
         inventoryEnabled: false,
         inventoryCronSchedule: null,
+        gristSyncedAt: null,
+        gristSyncError: null,
         ...overrides,
     };
 }

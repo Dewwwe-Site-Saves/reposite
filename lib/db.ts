@@ -4,9 +4,16 @@ import type { Job, Settings, Site, SiteComponent, User } from './generated/prism
 import type { Role } from './auth';
 import { decrypt, encrypt } from './crypto';
 import { DEFAULT_AUTHOR_NAME } from './engine/git';
-import type { Inventory } from './engine/inventory/types';
+import type { CmsId, Component, Inventory } from './engine/inventory/types';
+import type { GristConfig, SiteSnapshot } from './grist/sync';
 import type { ComponentRow } from './inventory';
-import type { GithubConfig, Protocol, SharePointConfig, SiteConfig } from './engine/types';
+import type {
+    GithubConfig,
+    Protocol,
+    RunOutcome,
+    SharePointConfig,
+    SiteConfig,
+} from './engine/types';
 import type { MailConfig } from './notifications/mailer';
 import { spCertDir } from './paths';
 import { prisma } from './prisma';
@@ -94,6 +101,8 @@ export const siteSelect = {
     inventoryAt: true,
     inventoryEnabled: true,
     inventoryCronSchedule: true,
+    gristSyncedAt: true,
+    gristSyncError: true,
 } satisfies Prisma.SiteSelect;
 
 export type SiteSummary = Omit<Site, 'passwordEnc'>;
@@ -341,6 +350,73 @@ export async function listInstalledComponents(): Promise<ComponentRow[]> {
     return rows.map(({ site: { cms, ...site }, ...row }) => ({ ...row, cms: cms ?? '', site }));
 }
 
+// ============ Grist ============
+
+/**
+ * What Grist is told of a site, read in one go: the last complete inventory, and three facts drawn from its backups, each from the run that carries it (the last one that succeeded, the last one that ended whatever its outcome, the last one that created a Release). `baseUrl` is the public URL of the app, for the link back to the site. Null when the site is gone.
+ */
+export async function getSiteSnapshot(
+    siteId: number,
+    baseUrl: string | null,
+): Promise<SiteSnapshot | null> {
+    const site = await prisma.site.findUnique({
+        where: { id: siteId },
+        select: {
+            domain: true,
+            cms: true,
+            cmsVersion: true,
+            inventoryAt: true,
+            components: {
+                select: { type: true, slug: true, name: true, version: true },
+                orderBy: [{ type: 'asc' }, { slug: 'asc' }],
+            },
+        },
+    });
+    if (!site) return null;
+
+    const backups = { siteId, kind: 'backup' };
+    const [succeeded, ended, released] = await Promise.all([
+        prisma.job.findFirst({
+            where: { ...backups, status: 'success' },
+            orderBy: { id: 'desc' },
+            select: { finishedAt: true },
+        }),
+        prisma.job.findFirst({
+            where: { ...backups, status: { notIn: [...ACTIVE_STATUSES] } },
+            orderBy: { id: 'desc' },
+            select: { status: true },
+        }),
+        prisma.job.findFirst({
+            where: { ...backups, releaseUrl: { not: null } },
+            orderBy: { id: 'desc' },
+            select: { releaseUrl: true },
+        }),
+    ]);
+
+    return {
+        domain: site.domain,
+        cms: site.cms as CmsId | null,
+        cmsVersion: site.cmsVersion,
+        inventoryAt: site.inventoryAt,
+        components: site.components as Component[],
+        lastBackupAt: succeeded?.finishedAt ?? null,
+        lastBackupStatus: (ended?.status as RunOutcome | undefined) ?? null,
+        lastBackupUrl: released?.releaseUrl ?? null,
+        repositeUrl: baseUrl ? `${baseUrl}/sites/${siteId}` : null,
+    };
+}
+
+/** Keeps the outcome of a push on the site row: the date when it went through, the reason when it did not (the date of the last good one stays). `updateMany`: the site may have been deleted meanwhile. */
+export async function recordGristSync(siteId: number, error: string | null): Promise<void> {
+    await prisma.site.updateMany({
+        where: { id: siteId },
+        data:
+            error === null
+                ? { gristSyncedAt: new Date(), gristSyncError: null }
+                : { gristSyncError: error },
+    });
+}
+
 // ============ Settings ============
 
 /** The singleton row, created with defaults on first access. A plain read afterwards: `upsert` would take a write transaction on every call. */
@@ -357,30 +433,36 @@ export async function getSettings(): Promise<Settings> {
 }
 
 /** Settings as the page and the API expose them: the secrets never leave the server, only whether one is stored (`SECRET_MASK`). Sending the mask back keeps it. */
-export type SettingsView = Omit<Settings, 'githubTokenEnc' | 'smtpPasswordEnc'> & {
+export type SettingsView = Omit<
+    Settings,
+    'githubTokenEnc' | 'smtpPasswordEnc' | 'gristApiKeyEnc'
+> & {
     githubToken: string;
     smtpPassword: string;
+    gristApiKey: string;
 };
 
 export function toSettingsView(settings: Settings): SettingsView {
-    const { githubTokenEnc, smtpPasswordEnc, ...rest } = settings;
+    const { githubTokenEnc, smtpPasswordEnc, gristApiKeyEnc, ...rest } = settings;
     return {
         ...rest,
         githubToken: githubTokenEnc ? SECRET_MASK : '',
         smtpPassword: smtpPasswordEnc ? SECRET_MASK : '',
+        gristApiKey: gristApiKeyEnc ? SECRET_MASK : '',
     };
 }
 
 /** An undefined secret keeps the stored one. The caller reloads the scheduler: `defaultCron` may have changed. */
 export async function updateSettings(input: SettingsInput): Promise<Settings> {
     await getSettings();
-    const { githubToken, smtpPassword, ...data } = input;
+    const { githubToken, smtpPassword, gristApiKey, ...data } = input;
     return prisma.settings.update({
         where: { id: 1 },
         data: {
             ...data,
             ...(githubToken ? { githubTokenEnc: encrypt(githubToken) } : {}),
             ...(smtpPassword ? { smtpPasswordEnc: encrypt(smtpPassword) } : {}),
+            ...(gristApiKey ? { gristApiKeyEnc: encrypt(gristApiKey) } : {}),
         },
     });
 }
@@ -450,6 +532,34 @@ export async function getSmtpPassword(settings: Settings): Promise<string | null
 export async function getMailConfig(settings?: Settings): Promise<MailConfig | null> {
     const s = settings ?? (await getSettings());
     return toMailConfig(s, await getSmtpPassword(s));
+}
+
+/** The Grist columns without the key, as stored or as typed in the form. */
+export type GristFields = Pick<
+    Settings,
+    'gristUrl' | 'gristDocId' | 'gristSitesTable' | 'gristComponentsTable'
+>;
+
+/** Null until the server, the key, the document and the sites table are set. The key is taken separately so the test can use the typed one. */
+export function toGristConfig(fields: GristFields, apiKey: string | null): GristConfig | null {
+    if (!fields.gristUrl || !apiKey || !fields.gristDocId || !fields.gristSitesTable) return null;
+    return {
+        serverUrl: fields.gristUrl,
+        apiKey,
+        docId: fields.gristDocId,
+        sitesTable: fields.gristSitesTable,
+        componentsTable: fields.gristComponentsTable,
+    };
+}
+
+export async function getGristApiKey(settings: Settings): Promise<string | null> {
+    return settings.gristApiKeyEnc ? decrypt(settings.gristApiKeyEnc) : null;
+}
+
+/** Decrypted Grist configuration, or null while the push is off. */
+export async function getGristConfig(settings?: Settings): Promise<GristConfig | null> {
+    const s = settings ?? (await getSettings());
+    return toGristConfig(s, await getGristApiKey(s));
 }
 
 /** Null unless every SharePoint field is filled in. */
